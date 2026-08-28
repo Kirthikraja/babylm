@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=40G
 #SBATCH --time=24:00:00
-#SBATCH --partition=gpu-a100-80g
+#SBATCH --partition=gpu-2080ti-11g
 #SBATCH --gres=gpu:1
 
 echo "========================================"
