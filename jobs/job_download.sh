@@ -27,6 +27,6 @@ conda activate "$ENV_NAME"
 cd "$REPO_ROOT"
 echo "Python: $(which python)"
 
-python -u src/download_data.py --split train_100M
+python -u src/download_data.py --scale 100M
 
 echo "Job finished: $(date)"
