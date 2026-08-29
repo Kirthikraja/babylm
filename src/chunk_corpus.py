@@ -399,8 +399,10 @@ def main() -> None:
     ensure_punkt()
 
 
-    log.info("Loading GPT2TokenizerFast …")
-    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+    tokenizer_path = Path(__file__).parent.parent / "tokenizer"
+    src = str(tokenizer_path) if tokenizer_path.exists() else "gpt2"
+    log.info("Loading GPT2TokenizerFast from %s ...", src)
+    tokenizer = GPT2TokenizerFast.from_pretrained(src)
     assert tokenizer.eos_token_id == EOS_ID, (
         f"Unexpected EOS id: {tokenizer.eos_token_id} (expected {EOS_ID})"
     )

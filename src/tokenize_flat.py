@@ -41,37 +41,48 @@ def process_file(
     tokenizer: GPT2TokenizerFast,
     max_tokens: int = MAX_TOKENS,
     stride: int = STRIDE,
+    log_every: int = 100_000,
 ) -> dict:
     sub_corpus = src_path.stem.replace(".train", "")
     out_path = out_dir / f"{sub_corpus}.jsonl"
     log.info("Processing  %s  ->  %s", src_path.name, out_path)
 
-    text = src_path.read_text(encoding="utf-8", errors="replace")
-    all_ids = tokenizer.encode(text, add_special_tokens=False)
-    log.info("  %d tokens total", len(all_ids))
-
-    chunks, chunk_id = [], 0
-    start = 0
-    while start < len(all_ids):
-        end = min(start + max_tokens, len(all_ids))
-        window = all_ids[start:end]
-        if len(window) == max_tokens:  # drop the final partial window
-            chunks.append({
-                "sub_corpus": sub_corpus,
-                "chunk_id": chunk_id,
-                "token_ids": window,
-                "n_tokens": len(window),
-            })
-            chunk_id += 1
-        start += stride
+    n_lines = sum(1 for _ in src_path.open("r", encoding="utf-8", errors="replace"))
+    log.info("  %d lines to tokenize", n_lines)
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as fh:
-        for chunk in chunks:
-            fh.write(json.dumps(chunk) + "\n")
+    buffer: list[int] = []
+    chunk_id = 0
+    n_chunks = 0
 
-    log.info("  -> %d windows  |  %d total tokens", len(chunks), len(chunks) * max_tokens)
-    return {"sub_corpus": sub_corpus, "n_chunks": len(chunks)}
+    with src_path.open("r", encoding="utf-8", errors="replace") as fh, \
+         out_path.open("w", encoding="utf-8") as out_fh:
+
+        for line_no, line in enumerate(fh, 1):
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            buffer.extend(tokenizer.encode(line, add_special_tokens=False))
+
+            # Flush complete windows from the buffer
+            while len(buffer) >= max_tokens:
+                window = buffer[:max_tokens]
+                out_fh.write(json.dumps({
+                    "sub_corpus": sub_corpus,
+                    "chunk_id": chunk_id,
+                    "token_ids": window,
+                    "n_tokens": max_tokens,
+                }) + "\n")
+                chunk_id += 1
+                n_chunks += 1
+                buffer = buffer[stride:]   # advance by stride (overlap = max_tokens - stride)
+
+            if line_no % log_every == 0:
+                log.info("  line %d / %d  |  chunks so far: %d  |  buffer: %d tokens",
+                         line_no, n_lines, n_chunks, len(buffer))
+
+    log.info("  -> %d windows written for %s", n_chunks, sub_corpus)
+    return {"sub_corpus": sub_corpus, "n_chunks": n_chunks}
 
 
 def parse_args() -> argparse.Namespace:
@@ -102,8 +113,11 @@ def main() -> None:
         log.error("No *.train.txt files in %s", in_dir)
         sys.exit(1)
 
-    log.info("Loading GPT2TokenizerFast ...")
-    tokenizer = GPT2TokenizerFast.from_pretrained("gpt2")
+    # Load from local cache if available, otherwise download once
+    tokenizer_path = base / "tokenizer"
+    src = str(tokenizer_path) if tokenizer_path.exists() else "gpt2"
+    log.info("Loading GPT2TokenizerFast from %s ...", src)
+    tokenizer = GPT2TokenizerFast.from_pretrained(src)
 
     for fpath in files:
         process_file(fpath, out_dir, tokenizer, args.max_tokens, args.stride)
