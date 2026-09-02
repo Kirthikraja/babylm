@@ -28,6 +28,6 @@ cd "$REPO_ROOT"
 echo "Python: $(which python)"
 
 # EOS-at-sentence-boundaries chunking (the WITH-CHUNKING condition)
-python -u src/chunk_corpus.py --corpus_scale 100M
+python -u src/chunk_corpus.py --corpus_scale 10M
 
 echo "Job finished: $(date)"

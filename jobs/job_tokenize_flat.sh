@@ -6,8 +6,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --time=7-00:00:00
-#SBATCH --partition=cpu-zen4
+#SBATCH --time=04:00:00
+#SBATCH --partition=cpu-short
 
 echo "========================================"
 echo "Job started: $(date)"
@@ -31,6 +31,6 @@ echo "Python: $(which python)"
 export TRANSFORMERS_CACHE="$REPO_ROOT/.cache/huggingface"
 export HF_HOME="$REPO_ROOT/.cache/huggingface"
 
-python -u src/tokenize_flat.py --corpus_scale 100M
+python -u src/tokenize_flat.py --corpus_scale 10M
 
 echo "Job finished: $(date)"

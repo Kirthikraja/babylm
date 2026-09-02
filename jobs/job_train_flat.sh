@@ -6,8 +6,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=40G
-#SBATCH --time=24:00:00
-#SBATCH --partition=gpu-2080ti-11g
+#SBATCH --time=04:00:00
+#SBATCH --partition=gpu-short
 #SBATCH --gres=gpu:1
 
 echo "========================================"
@@ -33,7 +33,7 @@ echo "GPU check: $(python -c 'import torch; print(torch.cuda.get_device_name(0))
 
 python -u src/train_gpt2.py \
     --condition flat \
-    --corpus_scale 100M \
+    --corpus_scale 10M \
     --epochs 1 \
     --batch_size 4 \
     --grad_accum 32 \
