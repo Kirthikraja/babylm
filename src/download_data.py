@@ -24,7 +24,10 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-HF_DATASET = "BabyLM-community/BabyLM-2026-Strict"
+HF_DATASETS = {
+    "100M": "BabyLM-community/BabyLM-2026-Strict",
+    "10M":  "BabyLM-community/BabyLM-2026-Strict-Small",
+}
 
 
 def parse_args() -> argparse.Namespace:
@@ -45,22 +48,14 @@ def main() -> None:
     out_dir = args.output_dir or base / "data" / "raw" / f"babylm_{args.scale}"
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    log.info("Downloading %s  scale=%s  split=%s ...", HF_DATASET, args.scale, args.split)
-    # Try with scale as config name first; fall back to no config
-    try:
-        ds = load_dataset(
-            HF_DATASET,
-            args.scale,
-            split=args.split,
-            cache_dir=str(args.cache_dir) if args.cache_dir else None,
-        )
-    except Exception:
-        log.info("Config '%s' not found, loading without config ...", args.scale)
-        ds = load_dataset(
-            HF_DATASET,
-            split=args.split,
-            cache_dir=str(args.cache_dir) if args.cache_dir else None,
-        )
+    hf_name = HF_DATASETS[args.scale]
+    log.info("Downloading %s  split=%s ...", hf_name, args.split)
+    ds = load_dataset(
+        hf_name,
+        split=args.split,
+        cache_dir=str(args.cache_dir) if args.cache_dir else None,
+        streaming=True,
+    )
     log.info("Streaming and writing corpus ...")
     out_path = out_dir / "corpus.train.txt"
     n_lines = 0

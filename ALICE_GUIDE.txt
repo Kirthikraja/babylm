@@ -1,0 +1,94 @@
+===============================================================
+ALICE HPC — Session Startup Checklist
+===============================================================
+
+Every time you log into ALICE, follow these steps in order.
+
+---------------------------------------------------------------
+STEP 1 — SSH into ALICE
+---------------------------------------------------------------
+ssh s4570170@alice.liacs.nl
+
+---------------------------------------------------------------
+STEP 2 — Go to your project folder
+---------------------------------------------------------------
+cd /zfsstore/user/s4570170/babylm
+
+---------------------------------------------------------------
+STEP 3 — Load the modules  (REQUIRED every session)
+---------------------------------------------------------------
+module load ALICE/default
+module load Miniconda3/24.7.1-0
+source /easybuild/software/Miniconda3/24.7.1-0/etc/profile.d/conda.sh
+
+---------------------------------------------------------------
+STEP 4 — Activate your conda environment  (REQUIRED every session)
+---------------------------------------------------------------
+conda activate babylm
+
+You should see (babylm) at the start of your prompt.
+If you don't see it, something went wrong in Step 3.
+
+---------------------------------------------------------------
+STEP 5 — Pull latest code from GitHub
+---------------------------------------------------------------
+git pull
+
+---------------------------------------------------------------
+STEP 6 — Submit a job
+---------------------------------------------------------------
+sbatch jobs/job_tokenize_flat.sh
+sbatch jobs/job_chunk.sh
+sbatch jobs/job_train_chunked.sh
+sbatch jobs/job_train_flat.sh
+sbatch jobs/job_eval_blimp_zorro.sh chunked
+sbatch jobs/job_eval_blimp_zorro.sh flat
+sbatch jobs/job_eval_ewok.sh chunked
+sbatch jobs/job_eval_ewok.sh flat
+sbatch jobs/job_compare.sh
+
+Run these in order. Wait for each step to finish before the next.
+
+---------------------------------------------------------------
+STEP 7 — Check if your job is running
+---------------------------------------------------------------
+squeue -u s4570170
+
+Status codes:
+  PD = pending (waiting in queue)
+  R  = running
+  CG = completing
+
+---------------------------------------------------------------
+STEP 8 — Watch the logs live
+---------------------------------------------------------------
+tail -f Logs/flat_JOBID.out
+
+Replace JOBID with the number shown in squeue output.
+Press Ctrl+C to stop watching.
+
+---------------------------------------------------------------
+STEP 9 — Check estimated queue wait time
+---------------------------------------------------------------
+squeue --start -u s4570170
+
+Look at the START_TIME column.
+
+---------------------------------------------------------------
+NOTES
+---------------------------------------------------------------
+- Steps 3 and 4 must be repeated every time you log in.
+  The modules do NOT persist between sessions.
+
+- If conda is not found, you skipped Step 3.
+
+- If a job times out, check the --time line in the job script
+  and increase it, then resubmit.
+
+- If PyTorch errors appear, run:
+  pip install torch==2.5.1 --index-url https://download.pytorch.org/whl/cu124
+
+- To cancel a job:
+  scancel JOBID
+
+===============================================================
