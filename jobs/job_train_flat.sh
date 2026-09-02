@@ -35,8 +35,8 @@ python -u src/train_gpt2.py \
     --condition flat \
     --corpus_scale 100M \
     --epochs 1 \
-    --batch_size 32 \
-    --grad_accum 4 \
+    --batch_size 4 \
+    --grad_accum 32 \
     --lr 6e-4
 
 echo "Job finished: $(date)"
