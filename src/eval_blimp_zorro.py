@@ -64,7 +64,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output_dir", type=Path, default=None)
     p.add_argument("--device", default="cuda")
     p.add_argument("--batch_size", type=int, default=64)
-    p.add_argument("--tasks", nargs="+", default=["blimp", "zorro"],
+    p.add_argument("--tasks", nargs="+", default=["blimp"],
                    choices=["blimp", "zorro"])
     return p.parse_args()
 

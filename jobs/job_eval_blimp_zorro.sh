@@ -39,7 +39,7 @@ echo "Model: $MODEL_PATH"
 python -u src/eval_blimp_zorro.py \
     --model_path "$MODEL_PATH" \
     --condition "$CONDITION" \
-    --tasks blimp zorro \
+    --tasks blimp \
     --device cuda \
     --batch_size 64
 

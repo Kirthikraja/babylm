@@ -36,6 +36,11 @@ cd "$REPO_ROOT"
 MODEL_PATH="$MODELS_ROOT/$CONDITION/final"
 echo "Model: $MODEL_PATH"
 
+# EWoK loads from data/ewok/test.parquet if it exists (no token needed).
+# To download: curl -L -H "Authorization: Bearer hf_TOKEN" \
+#   "https://huggingface.co/datasets/ewok-core/ewok-core-1.0/resolve/main/data/test-00000-of-00001.parquet" \
+#   -o "$REPO_ROOT/data/ewok/test.parquet"
+
 python -u src/eval_ewok.py \
     --model_path "$MODEL_PATH" \
     --condition "$CONDITION"
