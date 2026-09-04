@@ -63,14 +63,21 @@ def evaluate(
     by_domain: dict[str, list[bool]] = {}
 
     for item in tqdm(dataset, desc="EWoK", ncols=90):
-        sent_good = item["sentence1"]  # plausible sentence
-        sent_bad  = item["sentence2"]  # implausible sentence
-        domain    = item.get("domain", "unknown")
+        # EWoK columns: Context1, Context2, Target1, Target2, Domain
+        # Correct pairing: (Context1, Target1) and (Context2, Target2)
+        # Check: P(Context1 + Target1) > P(Context1 + Target2)
+        ctx1    = item["Context1"].strip()
+        tgt1    = item["Target1"].strip()
+        tgt2    = item["Target2"].strip()
+        domain  = item.get("Domain", "unknown")
 
-        lp_good = sentence_log_prob(model, tokenizer, sent_good, device)
-        lp_bad  = sentence_log_prob(model, tokenizer, sent_bad,  device)
+        sent_match    = ctx1 + " " + tgt1
+        sent_mismatch = ctx1 + " " + tgt2
 
-        hit = lp_good > lp_bad
+        lp_match    = sentence_log_prob(model, tokenizer, sent_match,    device)
+        lp_mismatch = sentence_log_prob(model, tokenizer, sent_mismatch, device)
+
+        hit = lp_match > lp_mismatch
         correct += int(hit)
         total += 1
         by_domain.setdefault(domain, []).append(hit)
