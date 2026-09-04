@@ -110,12 +110,17 @@ def main() -> None:
     model.eval()
 
     log.info("Loading EWoK dataset (%s split) ...", args.split)
-    ds = load_dataset(
-        EWOK_DATASET,
-        split=args.split,
-        cache_dir=str(args.cache_dir) if args.cache_dir else None,
-        trust_remote_code=True,
-    )
+    local_parquet = base / "data" / "ewok" / f"{args.split}.parquet"
+    if local_parquet.exists():
+        log.info("Loading from local file: %s", local_parquet)
+        ds = load_dataset("parquet", data_files=str(local_parquet), split="train")
+    else:
+        log.info("Local file not found, downloading from HuggingFace (requires HF_TOKEN)")
+        ds = load_dataset(
+            EWOK_DATASET,
+            split=args.split,
+            cache_dir=str(args.cache_dir) if args.cache_dir else None,
+        )
     log.info("%d items", len(ds))
 
     results = evaluate(model, tokenizer, ds, device)
