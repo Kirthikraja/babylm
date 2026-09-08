@@ -261,7 +261,7 @@ def plot_training_curves(results_dir: Path, out_dir: Path) -> None:
 # ── Figure 2: Aggregate summary bar chart ─────────────────────────────────────
 
 def plot_eval_summary(results_dir: Path, out_dir: Path) -> None:
-    benchmarks = ["BLiMP", "ZORRO", "EWoK"]
+    benchmarks = ["BLiMP", "EWoK"]
     data: dict[str, dict[str, float]] = {b: {} for b in benchmarks}
 
     for cond in CONDITIONS:
@@ -474,6 +474,65 @@ def plot_ewok_domains(results_dir: Path, out_dir: Path) -> None:
     log.info("Saved: %s", out)
 
 
+# ── Figure 6: BLiMP vs EWoK slope chart ──────────────────────────────────────
+
+def plot_blimp_vs_ewok(results_dir: Path, out_dir: Path) -> None:
+    scores: dict[str, dict[str, float]] = {}
+
+    for cond in CONDITIONS:
+        blimp = load_lmeval(results_dir, cond, "blimp")
+        ewok  = load_ewok(results_dir, cond)
+        if blimp is None or ewok is None:
+            continue
+        vals = [v for k in blimp for v in [blimp[k].get("acc,none") or blimp[k].get("acc")]
+                if v is not None and "blimp" in k]
+        if not vals:
+            continue
+        scores[cond] = {
+            "BLiMP": float(np.mean(vals)),
+            "EWoK":  ewok["overall_accuracy"],
+        }
+
+    if len(scores) < 2:
+        log.warning("Not enough data for slope chart — skipping figure 6")
+        return
+
+    benchmarks = ["BLiMP", "EWoK"]
+    x = [0, 1]
+
+    fig, ax = plt.subplots(figsize=(6, 5))
+
+    for cond in CONDITIONS:
+        if cond not in scores:
+            continue
+        y = [scores[cond][b] for b in benchmarks]
+        ax.plot(x, y, color=COLORS[cond], lw=LW + 0.5, linestyle="-",
+                marker="o", markersize=8, label=LABELS[cond], zorder=3)
+        # annotate end points
+        for xi, yi, bm in zip(x, y, benchmarks):
+            ha = "right" if xi == 0 else "left"
+            offset = -0.04 if xi == 0 else 0.04
+            ax.text(xi + offset, yi, f"{yi:.3f}", ha=ha, va="center",
+                    fontsize=10, color=COLORS[cond], fontweight="bold")
+
+    ax.axhline(CHANCE, color="gray", lw=1, ls=":", label="Chance (0.50)", zorder=1)
+    ax.set_xticks(x)
+    ax.set_xticklabels(benchmarks, fontsize=13, fontweight="bold")
+    ax.set_ylabel("Accuracy", fontsize=12)
+    ax.set_ylim(0.45, 0.75)
+    ax.set_xlim(-0.3, 1.3)
+    ax.set_title("Syntactic vs World-Knowledge Trade-off", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10, framealpha=0.8, loc="center")
+    ax.spines["bottom"].set_visible(False)
+    ax.tick_params(bottom=False)
+
+    fig.tight_layout()
+    out = out_dir / "blimp_vs_ewok_slope.png"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    log.info("Saved: %s", out)
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
@@ -495,6 +554,7 @@ def main() -> None:
     plot_blimp_categories(args.results_dir, out_dir)
     plot_zorro_paradigms(args.results_dir, out_dir)
     plot_ewok_domains(args.results_dir, out_dir)
+    plot_blimp_vs_ewok(args.results_dir, out_dir)
 
     log.info("Done. Figures saved to %s", out_dir)
 
