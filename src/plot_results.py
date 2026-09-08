@@ -146,12 +146,21 @@ def load_training_curves(results_dir: Path, condition: str) -> dict | None:
 def load_lmeval(results_dir: Path, condition: str, benchmark: str) -> dict | None:
     """Load lm-evaluation-harness JSON output.
 
-    lm-eval >= 0.4 may write either a .json file or a directory containing
-    results_*.json.  We try both.
+    Tries in order:
+      1. <condition>/<benchmark>.json  (explicit output path)
+      2. <condition>/<benchmark>_*.json  (timestamped, e.g. blimp_2026-09-04T....json)
+      3. <condition>/<benchmark>/results_*.json  (directory variant)
     """
     direct = results_dir / condition / f"{benchmark}.json"
     if direct.exists():
         data = json.loads(direct.read_text(encoding="utf-8"))
+        return data.get("results", data)
+
+    # timestamped file written by lm-eval when --output_path is a directory
+    candidates = sorted((results_dir / condition).glob(f"{benchmark}_*.json"))
+    if candidates:
+        data = json.loads(candidates[-1].read_text(encoding="utf-8"))
+        log.info("Loaded %s from %s", benchmark, candidates[-1].name)
         return data.get("results", data)
 
     # directory variant
@@ -161,7 +170,7 @@ def load_lmeval(results_dir: Path, condition: str, benchmark: str) -> dict | Non
             data = json.loads(f.read_text(encoding="utf-8"))
             return data.get("results", data)
 
-    log.warning("Not found: %s (tried file and directory)", direct)
+    log.warning("Not found: %s (tried file, glob, and directory)", direct)
     return None
 
 
