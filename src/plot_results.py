@@ -182,6 +182,14 @@ def load_ewok(results_dir: Path, condition: str) -> dict | None:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def load_fbt(results_dir: Path, condition: str) -> dict | None:
+    p = results_dir / condition / "fbt.json"
+    if not p.exists():
+        log.warning("Not found: %s", p)
+        return None
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
 def task_acc(task_results: dict, task_name: str) -> float | None:
     """Extract accuracy from an lm-eval task result dict."""
     row = task_results.get(task_name) or task_results.get(f"blimp_{task_name}") or \
@@ -261,7 +269,7 @@ def plot_training_curves(results_dir: Path, out_dir: Path) -> None:
 # ── Figure 2: Aggregate summary bar chart ─────────────────────────────────────
 
 def plot_eval_summary(results_dir: Path, out_dir: Path) -> None:
-    benchmarks = ["BLiMP", "EWoK"]
+    benchmarks = ["BLiMP", "EWoK", "FBT"]
     data: dict[str, dict[str, float]] = {b: {} for b in benchmarks}
 
     for cond in CONDITIONS:
@@ -272,16 +280,13 @@ def plot_eval_summary(results_dir: Path, out_dir: Path) -> None:
             if vals:
                 data["BLiMP"][cond] = float(np.mean(vals))
 
-        zorro = load_lmeval(results_dir, cond, "zorro")
-        if zorro:
-            vals = [v for k in zorro for v in [zorro[k].get("acc,none") or zorro[k].get("acc")]
-                    if v is not None and "zorro" in k]
-            if vals:
-                data["ZORRO"][cond] = float(np.mean(vals))
-
         ewok = load_ewok(results_dir, cond)
         if ewok:
             data["EWoK"][cond] = ewok["overall_accuracy"]
+
+        fbt = load_fbt(results_dir, cond)
+        if fbt:
+            data["FBT"][cond] = fbt["overall_accuracy"]
 
     # Check we have at least something
     if all(not d for d in data.values()):
@@ -474,7 +479,65 @@ def plot_ewok_domains(results_dir: Path, out_dir: Path) -> None:
     log.info("Saved: %s", out)
 
 
-# ── Figure 6: BLiMP vs EWoK slope chart ──────────────────────────────────────
+# ── Figure 6: FBT condition × cue breakdown ──────────────────────────────────
+
+def plot_fbt_breakdown(results_dir: Path, out_dir: Path) -> None:
+    results: dict[str, dict[str, float]] = {}
+    for cond in CONDITIONS:
+        data = load_fbt(results_dir, cond)
+        if data is None:
+            continue
+        results[cond] = data.get("by_condition_x_cue", {})
+
+    if not results:
+        log.warning("No FBT results — skipping FBT breakdown figure")
+        return
+
+    # Canonical order matching Tom's paper
+    cell_order = [
+        "False belief × Explicit",
+        "False belief × Implicit",
+        "True belief × Explicit",
+        "True belief × Implicit",
+    ]
+    # Use whatever keys are actually present
+    all_keys = sorted({k for r in results.values() for k in r})
+    cells = [k for k in cell_order if k in all_keys] or all_keys
+
+    short_labels = [c.replace(" × ", "\n×\n") for c in cells]
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+    bar_w = 0.35
+    x = np.arange(len(cells))
+
+    for i, cond in enumerate(CONDITIONS):
+        if cond not in results:
+            continue
+        vals = [results[cond].get(c, float("nan")) for c in cells]
+        offset = (i - (len(CONDITIONS) - 1) / 2) * bar_w
+        bars = ax.bar(x + offset, vals, bar_w, color=COLORS[cond],
+                      label=LABELS[cond], alpha=0.85, edgecolor="white", linewidth=0.5)
+        for bar, v in zip(bars, vals):
+            if not np.isnan(v):
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                        f"{v:.2f}", ha="center", va="bottom", fontsize=8)
+
+    ax.axhline(CHANCE, color="gray", lw=1, ls=":", label="Chance (0.50)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(short_labels, fontsize=9)
+    ax.set_ylabel("Accuracy", fontsize=12)
+    ax.set_ylim(0, 1.05)
+    ax.set_title("False Belief Test: Accuracy by Condition & Knowledge Cue", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10, framealpha=0.8)
+
+    fig.tight_layout()
+    out = out_dir / "fbt_breakdown.png"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    log.info("Saved: %s", out)
+
+
+# ── Figure 7: BLiMP vs EWoK slope chart ──────────────────────────────────────
 
 def plot_blimp_vs_ewok(results_dir: Path, out_dir: Path) -> None:
     scores: dict[str, dict[str, float]] = {}
@@ -554,6 +617,7 @@ def main() -> None:
     plot_blimp_categories(args.results_dir, out_dir)
     plot_zorro_paradigms(args.results_dir, out_dir)
     plot_ewok_domains(args.results_dir, out_dir)
+    plot_fbt_breakdown(args.results_dir, out_dir)
     plot_blimp_vs_ewok(args.results_dir, out_dir)
 
     log.info("Done. Figures saved to %s", out_dir)
