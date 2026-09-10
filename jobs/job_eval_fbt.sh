@@ -33,15 +33,12 @@ conda activate "$ENV_NAME"
 
 cd "$REPO_ROOT"
 
-# Download stimuli if not present
-FBT_DIR="$REPO_ROOT/data/fbt"
-FBT_CSV="$FBT_DIR/fb.csv"
+# Stimuli must be committed to data/fbt/fb.csv (EPITOME dataset from Tom)
+FBT_CSV="$REPO_ROOT/data/fbt/fb.csv"
 if [ ! -f "$FBT_CSV" ]; then
-    echo "Downloading FBT stimuli..."
-    mkdir -p "$FBT_DIR"
-    wget -q -O "$FBT_CSV" \
-        "https://raw.githubusercontent.com/seantrott/nlm-fb/main/data/stims/fb.csv"
-    echo "Downloaded: $FBT_CSV"
+    echo "ERROR: FBT stimuli not found at $FBT_CSV"
+    echo "Copy the EPITOME fb.csv into data/fbt/ and git push, then git pull here."
+    exit 1
 fi
 
 MODEL_PATH="$MODELS_ROOT/$CONDITION/final"

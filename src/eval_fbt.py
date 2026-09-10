@@ -178,7 +178,16 @@ def main() -> None:
 
     log.info("Loading FBT stimuli from %s ...", data_path)
     df = pd.read_csv(data_path)
-    log.info("%d items loaded", len(df))
+    log.info("%d total rows in CSV", len(df))
+
+    # Filter to the balanced 192-item subset used by Kouwenhoven et al. (2026):
+    # first_mention=Start, recent_mention=End (start mentioned first, end most recently)
+    # This controls for recency and primacy biases while keeping the dataset balanced.
+    if "first_mention" in df.columns and "recent_mention" in df.columns:
+        df = df[(df["first_mention"] == "Start") & (df["recent_mention"] == "End")]
+        log.info("%d items after filtering to first=Start, recent=End", len(df))
+    else:
+        log.warning("Mention columns not found — using all %d rows", len(df))
 
     results = evaluate(model, tokenizer, df, device)
 
