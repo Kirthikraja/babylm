@@ -116,7 +116,7 @@ def evaluate(
 
     # By condition
     by_condition: dict[str, float] = {}
-    for cond in ("False belief", "True belief"):
+    for cond in ("False Belief", "True Belief"):
         sub = [r for r in results if r["condition"] == cond]
         if sub:
             by_condition[cond] = sum(r["correct"] for r in sub) / len(sub)
@@ -130,7 +130,7 @@ def evaluate(
 
     # By condition × cue (Tom's main analysis dimension)
     by_condition_cue: dict[str, float] = {}
-    for cond in ("False belief", "True belief"):
+    for cond in ("False Belief", "True Belief"):
         for cue in set(r["knowledge_cue"] for r in results):
             sub = [r for r in results if r["condition"] == cond and r["knowledge_cue"] == cue]
             if sub:

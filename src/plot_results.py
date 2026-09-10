@@ -495,10 +495,10 @@ def plot_fbt_breakdown(results_dir: Path, out_dir: Path) -> None:
 
     # Canonical order matching Tom's paper
     cell_order = [
-        "False belief × Explicit",
-        "False belief × Implicit",
-        "True belief × Explicit",
-        "True belief × Implicit",
+        "False Belief × Explicit",
+        "False Belief × Implicit",
+        "True Belief × Explicit",
+        "True Belief × Implicit",
     ]
     # Use whatever keys are actually present
     all_keys = sorted({k for r in results.values() for k in r})
