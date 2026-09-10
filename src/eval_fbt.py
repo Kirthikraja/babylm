@@ -106,8 +106,13 @@ def evaluate(
             "condition": condition,
             "knowledge_cue": cue_type,
             "correct": bool(correct),
-            "lp_start": lp_start,
-            "lp_end": lp_end,
+            "model_choice": "start" if lp_start > lp_end else "end",
+            "correct_answer": "start" if "false" in condition.lower() else "end",
+            "start_location": start_loc,
+            "end_location": end_loc,
+            "lp_start": round(lp_start, 4),
+            "lp_end": round(lp_end, 4),
+            "passage": passage,
         })
 
     # ── Aggregate ─────────────────────────────────────────────────────────────
@@ -143,6 +148,7 @@ def evaluate(
         "by_condition": by_condition,
         "by_knowledge_cue": by_cue,
         "by_condition_x_cue": by_condition_cue,
+        "items": results,   # full per-item detail for error analysis
     }
 
 
