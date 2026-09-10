@@ -105,6 +105,8 @@ def evaluate(
         results.append({
             "condition": condition,
             "knowledge_cue": cue_type,
+            "first_mention":  str(row.get("first_mention",  "")).strip(),
+            "recent_mention": str(row.get("recent_mention", "")).strip(),
             "correct": bool(correct),
             "model_choice": "start" if lp_start > lp_end else "end",
             "correct_answer": "start" if "false" in condition.lower() else "end",
@@ -159,6 +161,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output_dir",  type=Path, default=None)
     p.add_argument("--data_path",   type=Path, default=None,
                    help="Path to fb.csv (default: data/fbt/fb.csv)")
+    p.add_argument("--all_items", action="store_true",
+                   help="Skip mention-order filter — use all rows for mention-order analysis")
     return p.parse_args()
 
 
@@ -186,10 +190,9 @@ def main() -> None:
     df = pd.read_csv(data_path)
     log.info("%d total rows in CSV", len(df))
 
-    # Filter to the balanced 192-item subset used by Kouwenhoven et al. (2026):
-    # first_mention=Start, recent_mention=End (start mentioned first, end most recently)
-    # This controls for recency and primacy biases while keeping the dataset balanced.
-    if "first_mention" in df.columns and "recent_mention" in df.columns:
+    if args.all_items:
+        log.info("--all_items: skipping mention-order filter, using all %d rows", len(df))
+    elif "first_mention" in df.columns and "recent_mention" in df.columns:
         df = df[(df["first_mention"] == "Start") & (df["recent_mention"] == "End")]
         log.info("%d items after filtering to first=Start, recent=End", len(df))
     else:
