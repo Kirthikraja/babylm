@@ -166,26 +166,18 @@ def density_sample(
 
 # ── Per-corpus processing ──────────────────────────────────────────────────────
 
-def process_corpus(
-    jsonl_path: Path,
-    out_path: Path,
+def process_subcorpus(
+    sub_corpus: str,
+    chunks: list[dict],
     model: GPT2Model,
     device: torch.device,
     target_k: int,
     batch_size: int,
     seed: int,
-) -> dict:
-    sub_corpus = jsonl_path.stem
-
-    log.info("Loading %s …", jsonl_path.name)
-    chunks: list[dict] = []
-    with jsonl_path.open("r", encoding="utf-8") as fh:
-        for line in fh:
-            if line.strip():
-                chunks.append(json.loads(line))
-
+) -> tuple[list[dict], dict]:
+    """Embed + DENSITY-sample one sub-corpus group. Returns (selected_chunks, summary)."""
     n_before = len(chunks)
-    log.info("  %d chunks loaded", n_before)
+    log.info("  %s: %d chunks → embedding …", sub_corpus, n_before)
 
     token_id_lists = [c["token_ids"] for c in chunks]
     embeddings = embed_chunks(token_id_lists, model, device, batch_size)
@@ -193,13 +185,9 @@ def process_corpus(
     selected = density_sample(chunks, embeddings, target_k, seed)
     n_after = len(selected)
 
-    # Re-index chunk_id sequentially in the output
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open("w", encoding="utf-8") as fh:
-        for new_id, chunk in enumerate(selected):
-            chunk["chunk_id"] = new_id
-            chunk["selected_by"] = "density"
-            fh.write(json.dumps(chunk) + "\n")
+    for new_id, chunk in enumerate(selected):
+        chunk["chunk_id"] = new_id
+        chunk["selected_by"] = "density"
 
     total_tokens = sum(c["n_tokens"] for c in selected)
     log.info(
@@ -208,13 +196,26 @@ def process_corpus(
         100.0 * n_after / n_before if n_before else 0,
         total_tokens,
     )
-    return {
-        "sub_corpus":    sub_corpus,
-        "n_before":      n_before,
-        "n_after":       n_after,
-        "tokens_after":  total_tokens,
-        "pct_kept":      round(100.0 * n_after / n_before, 1) if n_before else 0,
+    return selected, {
+        "sub_corpus":   sub_corpus,
+        "n_before":     n_before,
+        "n_after":      n_after,
+        "tokens_after": total_tokens,
+        "pct_kept":     round(100.0 * n_after / n_before, 1) if n_before else 0,
     }
+
+
+def load_and_group(jsonl_path: Path) -> dict[str, list[dict]]:
+    """Load a JSONL file and group chunks by their sub_corpus field."""
+    groups: dict[str, list[dict]] = {}
+    with jsonl_path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            if not line.strip():
+                continue
+            obj = json.loads(line)
+            key = obj.get("sub_corpus", "unknown")
+            groups.setdefault(key, []).append(obj)
+    return groups
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -264,11 +265,12 @@ def main() -> None:
     in_dir  = args.input_dir  or base / "data" / f"chunked_{args.corpus_scale}"
     out_dir = args.output_dir or base / "data" / f"balanced_{args.corpus_scale}"
     drop    = {d.lower() for d in args.drop}
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info("Device          : %s", device)
     log.info("Embedding model : %s", args.model_name)
-    log.info("Target k        : %d", args.target_k)
+    log.info("Target k        : %d per sub-corpus", args.target_k)
     log.info("Drop            : %s", sorted(drop))
     log.info("Input dir       : %s", in_dir)
     log.info("Output dir      : %s", out_dir)
@@ -277,44 +279,69 @@ def main() -> None:
     model = GPT2Model.from_pretrained(args.model_name).to(device)
     model.eval()
 
-    jsonl_files = sorted(in_dir.glob("*.jsonl"))
-    if not jsonl_files:
+    # ── Detect combined vs per-subcorpus layout ──────────────────────────────
+    # chunk_corpus.py may write a single corpus.jsonl (all sub-corpora merged)
+    # or one file per sub-corpus.  Handle both.
+    combined_file = in_dir / "corpus.jsonl"
+    jsonl_files   = sorted(f for f in in_dir.glob("*.jsonl")
+                           if f.name != "corpus.jsonl")
+
+    if combined_file.exists():
+        log.info("Detected combined corpus.jsonl — grouping by sub_corpus field …")
+        groups = load_and_group(combined_file)
+        log.info("  Sub-corpora found: %s", sorted(groups))
+    elif jsonl_files:
+        log.info("Detected %d per-subcorpus files …", len(jsonl_files))
+        groups = {}
+        for jf in jsonl_files:
+            chunks = []
+            with jf.open("r", encoding="utf-8") as fh:
+                for line in fh:
+                    if line.strip():
+                        chunks.append(json.loads(line))
+            groups[jf.stem] = chunks
+    else:
         log.error("No .jsonl files found in %s — run chunk_corpus.py first.", in_dir)
         sys.exit(1)
 
+    # ── Smoke-test: cap each group ───────────────────────────────────────────
+    if args.smoke_test:
+        groups = {k: v[:200] for k, v in groups.items()}
+        args.target_k = min(args.target_k, 20)
+        log.info("Smoke-test: capped at 200 chunks/sub-corpus, target_k=%d", args.target_k)
+
+    # ── Process each sub-corpus independently ────────────────────────────────
     summaries: list[dict] = []
-    for jf in jsonl_files:
-        sub_corpus = jf.stem.lower()
-        if sub_corpus in drop:
+    all_selected: list[dict] = []
+
+    for sub_corpus in sorted(groups):
+        if sub_corpus.lower() in drop:
             log.info("Dropping %s (in --drop list)", sub_corpus)
             continue
-
-        out_path = out_dir / jf.name
-
-        # Smoke-test: cap at 200 chunks
-        if args.smoke_test:
-            chunks = []
-            with jf.open("r", encoding="utf-8") as fh:
-                for i, line in enumerate(fh):
-                    if i >= 200:
-                        break
-                    if line.strip():
-                        chunks.append(json.loads(line))
-            # write temp file so process_corpus can load it
-            import tempfile, os
-            tmp = Path(tempfile.mktemp(suffix=".jsonl"))
-            with tmp.open("w") as fh:
-                for c in chunks:
-                    fh.write(json.dumps(c) + "\n")
-            target = min(args.target_k, 20)
-            summary = process_corpus(tmp, out_path, model, device, target, args.batch_size, args.seed)
-            tmp.unlink(missing_ok=True)
-        else:
-            summary = process_corpus(jf, out_path, model, device, args.target_k, args.batch_size, args.seed)
-
+        chunks = groups[sub_corpus]
+        selected, summary = process_subcorpus(
+            sub_corpus, chunks, model, device, args.target_k, args.batch_size, args.seed
+        )
         summaries.append(summary)
+        all_selected.extend(selected)
 
-    # Summary table
+    # ── Write output ─────────────────────────────────────────────────────────
+    # Mirror the input layout: combined input → combined output; per-file → per-file
+    if combined_file.exists():
+        out_path = out_dir / "corpus.jsonl"
+        with out_path.open("w", encoding="utf-8") as fh:
+            for chunk in all_selected:
+                fh.write(json.dumps(chunk) + "\n")
+        log.info("Written combined output: %s (%d chunks)", out_path, len(all_selected))
+    else:
+        for summary, sub_corpus in zip(summaries, [s["sub_corpus"] for s in summaries]):
+            sub_chunks = [c for c in all_selected if c["sub_corpus"] == sub_corpus]
+            op = out_dir / f"{sub_corpus}.jsonl"
+            with op.open("w", encoding="utf-8") as fh:
+                for chunk in sub_chunks:
+                    fh.write(json.dumps(chunk) + "\n")
+
+    # ── Summary table ────────────────────────────────────────────────────────
     print()
     header = f"{'Sub-corpus':<22} {'Before':>8} {'After':>8} {'% kept':>8} {'Tokens':>12}"
     sep = "-" * len(header)
