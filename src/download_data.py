@@ -42,6 +42,9 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+SOURCE_FIELDS = ("sub_corpus", "source", "dataset", "domain", "split_name")
+
+
 def main() -> None:
     args = parse_args()
     base = Path(__file__).parent.parent
@@ -56,17 +59,49 @@ def main() -> None:
         cache_dir=str(args.cache_dir) if args.cache_dir else None,
         streaming=True,
     )
+
     log.info("Streaming and writing corpus ...")
-    out_path = out_dir / "corpus.train.txt"
+    source_field: str | None = None
+    file_handles: dict[str, object] = {}
     n_lines = 0
-    with out_path.open("w", encoding="utf-8") as fh:
+
+    try:
         for row in ds:
-            fh.write(row["text"] + "\n")
+            # Detect source field on first row
+            if n_lines == 0:
+                for f in SOURCE_FIELDS:
+                    if f in row:
+                        source_field = f
+                        break
+                if source_field:
+                    log.info("  Detected sub-corpus field: '%s' — writing per-subcorpus files", source_field)
+                else:
+                    log.warning("  No sub-corpus field found (%s) — writing combined corpus.train.txt", SOURCE_FIELDS)
+
+            text = row["text"]
+            if source_field and (sub := row.get(source_field)):
+                key = str(sub).lower().replace(" ", "_").replace("-", "_")
+                if key not in file_handles:
+                    p = out_dir / f"{key}.train.txt"
+                    file_handles[key] = p.open("w", encoding="utf-8")
+                    log.info("  Opened %s", p)
+                file_handles[key].write(text + "\n")
+            else:
+                if "corpus" not in file_handles:
+                    file_handles["corpus"] = (out_dir / "corpus.train.txt").open("w", encoding="utf-8")
+                file_handles["corpus"].write(text + "\n")
+
             n_lines += 1
             if n_lines % 500_000 == 0:
                 log.info("  %d lines written ...", n_lines)
-    log.info("Wrote %d lines -> %s", n_lines, out_path)
+    finally:
+        for fh in file_handles.values():
+            fh.close()
 
+    log.info("Wrote %d lines across %d file(s):", n_lines, len(file_handles))
+    for key in sorted(file_handles):
+        p = out_dir / f"{key}.train.txt"
+        log.info("  %s", p)
     log.info("Done. Data saved to %s", out_dir)
 
 
