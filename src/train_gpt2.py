@@ -237,7 +237,7 @@ def train(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--condition", choices=["chunked", "flat"], required=True)
+    p.add_argument("--condition", choices=["chunked", "flat", "balanced"], required=True)
     p.add_argument("--corpus_scale", choices=["10M", "100M"], default="10M")
     p.add_argument("--data_dir", type=Path, default=None)
     p.add_argument("--output_dir", type=Path, default=None)
