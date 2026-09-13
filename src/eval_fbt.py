@@ -157,7 +157,7 @@ def evaluate(
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--model_path",  type=str,  required=True)
-    p.add_argument("--condition",   choices=["chunked", "flat"], required=True)
+    p.add_argument("--condition",   choices=["chunked", "flat", "balanced"], required=True)
     p.add_argument("--output_dir",  type=Path, default=None)
     p.add_argument("--data_path",   type=Path, default=None,
                    help="Path to fb.csv (default: data/fbt/fb.csv)")

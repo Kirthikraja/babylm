@@ -95,7 +95,7 @@ def evaluate(
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--model_path", type=str, required=True)
-    p.add_argument("--condition", choices=["chunked", "flat"], required=True)
+    p.add_argument("--condition", choices=["chunked", "flat", "balanced"], required=True)
     p.add_argument("--output_dir", type=Path, default=None)
     p.add_argument("--split", default="test")
     p.add_argument("--cache_dir", type=Path, default=None)
