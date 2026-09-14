@@ -44,9 +44,12 @@ ALPHA  = 0.15        # shaded band transparency
 LW     = 2.0         # line width
 CHANCE = 0.5         # BLiMP/ZORRO chance level
 
-CONDITIONS = ["chunked", "flat"]
-LABELS     = {"chunked": "EOS-Chunked", "flat": "Sliding-Window (Flat)"}
-COLORS     = {"chunked": BLUE, "flat": ORANGE}
+GREEN = "#2ca02c"   # matplotlib C2
+
+CONDITIONS       = ["chunked", "flat"]           # training curves only
+CONDITIONS_ALL   = ["chunked", "flat", "balanced"]
+LABELS     = {"chunked": "EOS-Chunked", "flat": "Sliding-Window (Flat)", "balanced": "DENSITY-Balanced"}
+COLORS     = {"chunked": BLUE, "flat": ORANGE, "balanced": GREEN}
 
 plt.rcParams.update({
     "font.family": "DejaVu Sans",
@@ -183,11 +186,12 @@ def load_ewok(results_dir: Path, condition: str) -> dict | None:
 
 
 def load_fbt(results_dir: Path, condition: str) -> dict | None:
-    p = results_dir / condition / "fbt.json"
-    if not p.exists():
-        log.warning("Not found: %s", p)
-        return None
-    return json.loads(p.read_text(encoding="utf-8"))
+    for name in ("fbt_all.json", "fbt.json"):
+        p = results_dir / condition / name
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    log.warning("No FBT result found for %s", condition)
+    return None
 
 
 def task_acc(task_results: dict, task_name: str) -> float | None:
@@ -266,13 +270,13 @@ def plot_training_curves(results_dir: Path, out_dir: Path) -> None:
     log.info("Saved: %s", out)
 
 
-# ── Figure 2: Aggregate summary bar chart ─────────────────────────────────────
+# ── Figure 2: BLiMP + EWoK summary (all 3 conditions) ────────────────────────
 
 def plot_eval_summary(results_dir: Path, out_dir: Path) -> None:
-    benchmarks = ["BLiMP", "EWoK", "FBT"]
+    benchmarks = ["BLiMP", "EWoK"]
     data: dict[str, dict[str, float]] = {b: {} for b in benchmarks}
 
-    for cond in CONDITIONS:
+    for cond in CONDITIONS_ALL:
         blimp = load_lmeval(results_dir, cond, "blimp")
         if blimp:
             vals = [v for k in blimp for v in [blimp[k].get("acc,none") or blimp[k].get("acc")]
@@ -282,25 +286,20 @@ def plot_eval_summary(results_dir: Path, out_dir: Path) -> None:
 
         ewok = load_ewok(results_dir, cond)
         if ewok:
-            data["EWoK"][cond] = ewok["overall_accuracy"]
+            data["EWoK"][cond] = ewok.get("overall_accuracy") or ewok.get("accuracy", float("nan"))
 
-        fbt = load_fbt(results_dir, cond)
-        if fbt:
-            data["FBT"][cond] = fbt["overall_accuracy"]
-
-    # Check we have at least something
     if all(not d for d in data.values()):
-        log.warning("No evaluation results found — skipping figure 2")
+        log.warning("No evaluation results found — skipping eval summary")
         return
 
     fig, ax = plt.subplots(figsize=(8, 5))
     n_benchmarks = len(benchmarks)
-    n_conditions = len(CONDITIONS)
-    bar_w = 0.32
+    n_conditions = len(CONDITIONS_ALL)
+    bar_w = 0.25
     x = np.arange(n_benchmarks)
 
-    for i, cond in enumerate(CONDITIONS):
-        vals  = [data[b].get(cond, float("nan")) for b in benchmarks]
+    for i, cond in enumerate(CONDITIONS_ALL):
+        vals = [data[b].get(cond, float("nan")) for b in benchmarks]
         offset = (i - (n_conditions - 1) / 2) * bar_w
         bars = ax.bar(x + offset, vals, bar_w, color=COLORS[cond],
                       label=LABELS[cond], alpha=0.85, edgecolor="white", linewidth=0.5)
@@ -313,12 +312,61 @@ def plot_eval_summary(results_dir: Path, out_dir: Path) -> None:
     ax.set_xticks(x)
     ax.set_xticklabels(benchmarks, fontsize=12)
     ax.set_ylabel("Accuracy", fontsize=12)
-    ax.set_ylim(0, 1.05)
-    ax.set_title("Evaluation Summary: EOS-Chunked vs Sliding-Window", fontsize=13, fontweight="bold")
+    ax.set_ylim(0.4, 0.75)
+    ax.set_title("BLiMP & EWoK Accuracy by Training Condition", fontsize=13, fontweight="bold")
     ax.legend(fontsize=10, framealpha=0.8)
 
     fig.tight_layout()
     out = out_dir / "eval_summary.png"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    log.info("Saved: %s", out)
+
+
+# ── Figure NEW: FBT False Belief vs True Belief ───────────────────────────────
+
+def plot_fbt_belief_condition(results_dir: Path, out_dir: Path) -> None:
+    fb_accs: dict[str, float] = {}
+    tb_accs: dict[str, float] = {}
+
+    for cond in CONDITIONS_ALL:
+        data = load_fbt(results_dir, cond)
+        if data is None:
+            continue
+        by_cond = data.get("by_condition", {})
+        fb_accs[cond] = by_cond.get("False Belief", float("nan"))
+        tb_accs[cond] = by_cond.get("True Belief",  float("nan"))
+
+    if not fb_accs:
+        log.warning("No FBT results — skipping FBT belief condition figure")
+        return
+
+    belief_types = ["False Belief", "True Belief"]
+    fig, ax = plt.subplots(figsize=(7, 5))
+    bar_w = 0.25
+    x = np.arange(len(belief_types))
+    n_conditions = len(CONDITIONS_ALL)
+
+    for i, cond in enumerate(CONDITIONS_ALL):
+        vals = [fb_accs.get(cond, float("nan")), tb_accs.get(cond, float("nan"))]
+        offset = (i - (n_conditions - 1) / 2) * bar_w
+        bars = ax.bar(x + offset, vals, bar_w, color=COLORS[cond],
+                      label=LABELS[cond], alpha=0.85, edgecolor="white", linewidth=0.5)
+        for bar, v in zip(bars, vals):
+            if not np.isnan(v):
+                ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
+                        f"{v:.2f}", ha="center", va="bottom", fontsize=10, fontweight="bold")
+
+    ax.axhline(CHANCE, color="gray", lw=1.2, ls=":", label="Chance (0.50)")
+    ax.set_xticks(x)
+    ax.set_xticklabels(belief_types, fontsize=13)
+    ax.set_ylabel("Accuracy", fontsize=12)
+    ax.set_ylim(0, 1.05)
+    ax.set_title("False Belief Test: Accuracy by Belief Condition", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10, framealpha=0.8)
+
+    fig.tight_layout()
+    out = out_dir / "fbt_belief_condition.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved: %s", out)
@@ -483,7 +531,7 @@ def plot_ewok_domains(results_dir: Path, out_dir: Path) -> None:
 
 def plot_fbt_breakdown(results_dir: Path, out_dir: Path) -> None:
     results: dict[str, dict[str, float]] = {}
-    for cond in CONDITIONS:
+    for cond in CONDITIONS_ALL:
         data = load_fbt(results_dir, cond)
         if data is None:
             continue
@@ -510,11 +558,11 @@ def plot_fbt_breakdown(results_dir: Path, out_dir: Path) -> None:
     bar_w = 0.35
     x = np.arange(len(cells))
 
-    for i, cond in enumerate(CONDITIONS):
+    for i, cond in enumerate(CONDITIONS_ALL):
         if cond not in results:
             continue
         vals = [results[cond].get(c, float("nan")) for c in cells]
-        offset = (i - (len(CONDITIONS) - 1) / 2) * bar_w
+        offset = (i - (len(CONDITIONS_ALL) - 1) / 2) * bar_w
         bars = ax.bar(x + offset, vals, bar_w, color=COLORS[cond],
                       label=LABELS[cond], alpha=0.85, edgecolor="white", linewidth=0.5)
         for bar, v in zip(bars, vals):
@@ -612,13 +660,10 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     log.info("Output directory: %s", out_dir)
 
-    plot_training_curves(args.results_dir, out_dir)
-    plot_eval_summary(args.results_dir, out_dir)
-    plot_blimp_categories(args.results_dir, out_dir)
-    plot_zorro_paradigms(args.results_dir, out_dir)
-    plot_ewok_domains(args.results_dir, out_dir)
-    plot_fbt_breakdown(args.results_dir, out_dir)
-    plot_blimp_vs_ewok(args.results_dir, out_dir)
+    plot_training_curves(args.results_dir, out_dir)       # Fig 1: loss curves (chunked vs flat)
+    plot_fbt_belief_condition(args.results_dir, out_dir)  # Fig 2: FB vs TB accuracy (main result)
+    plot_fbt_breakdown(args.results_dir, out_dir)         # Fig 3: 2x2 condition x cue
+    plot_eval_summary(args.results_dir, out_dir)          # Fig 4: BLiMP + EWoK summary
 
     log.info("Done. Figures saved to %s", out_dir)
 
