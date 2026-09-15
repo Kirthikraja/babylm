@@ -213,55 +213,60 @@ def category_acc(task_results: dict, subtasks: list[str], prefix: str = "") -> f
     return float(np.mean(vals)) if vals else None
 
 
-# ── Figure 1: Training curves ─────────────────────────────────────────────────
+# ── Figure 1: Training curves (loss vs epoch, all 3 conditions) ──────────────
 
 def plot_training_curves(results_dir: Path, out_dir: Path) -> None:
-    fig, axes = plt.subplots(1, 2, figsize=(12, 4.5), sharey=False)
+    fig, ax = plt.subplots(figsize=(10, 5))
     plotted = False
 
-    for cond in CONDITIONS:
+    for cond in CONDITIONS_ALL:
         data = load_training_curves(results_dir, cond)
         if data is None:
             continue
+        epochs = data.get("epoch_num")
+        train_loss = data.get("epoch_train_loss")
+        eval_loss  = data.get("epoch_eval_loss")
+        if not epochs:
+            log.warning("No epoch-level data for %s — skipping", cond)
+            continue
         plotted = True
-        words = [w / 1_000_000 for w in data["words_seen"]]   # → millions
-        col   = COLORS[cond]
-        lbl   = LABELS[cond]
+        col = COLORS[cond]
+        lbl = LABELS[cond]
 
-        # ── left: loss ───────────────────────────────────────────────────────
-        axes[0].plot(words, data["train_loss"], color=col, lw=LW,
-                     linestyle="-",  label=f"{lbl} – Train")
-        axes[0].plot(words, data["eval_loss"],  color=col, lw=LW,
-                     linestyle="--", label=f"{lbl} – Validation")
+        ax.plot(epochs, train_loss, color=col, lw=LW, linestyle="-",
+                label=f"{lbl} – Train")
+        ax.plot(epochs, eval_loss,  color=col, lw=LW, linestyle="--",
+                label=f"{lbl} – Validation")
 
-        # ── right: perplexity ─────────────────────────────────────────────
-        train_ppl = [np.exp(l) for l in data["train_loss"]]
-        eval_ppl  = [np.exp(l) for l in data["eval_loss"]]
-        axes[1].plot(words, train_ppl, color=col, lw=LW,
-                     linestyle="-",  label=f"{lbl} – Train")
-        axes[1].plot(words, eval_ppl,  color=col, lw=LW,
-                     linestyle="--", label=f"{lbl} – Validation")
+        # Mark early stopping point with a vertical dotted line
+        stopped_at = data.get("early_stopped_at")
+        if stopped_at is not None:
+            ax.axvline(x=stopped_at, color=col, lw=1.2, linestyle=":",
+                       alpha=0.7)
+            ax.annotate(f"stopped\n(ep {stopped_at})",
+                        xy=(stopped_at, min(eval_loss)),
+                        xytext=(stopped_at + 0.3, min(eval_loss) + 0.05),
+                        fontsize=8, color=col, va="bottom")
 
     if not plotted:
-        log.warning("No training curves found — skipping figure 1")
+        log.warning("No epoch-level training curves found — skipping figure 1")
         plt.close(fig)
         return
 
-    for ax, ylabel, title in zip(
-        axes,
-        ["Cross-Entropy Loss", "Perplexity"],
-        ["Training & Validation Loss", "Training & Validation Perplexity"],
-    ):
-        ax.set_xlabel("Words Seen (M)", fontsize=12)
-        ax.set_ylabel(ylabel, fontsize=12)
-        ax.set_title(title, fontsize=13, fontweight="bold")
-        ax.legend(fontsize=9, framealpha=0.8)
+    ax.set_xlabel("Epoch", fontsize=12)
+    ax.set_ylabel("Cross-Entropy Loss", fontsize=12)
+    ax.set_title("Training & Validation Loss by Epoch", fontsize=13, fontweight="bold")
+    ax.xaxis.set_major_locator(plt.MaxNLocator(integer=True))
 
-    # Legend hint matching reference image style
+    # Chance line not applicable for loss; add a clean legend instead
     solid_patch = plt.Line2D([0], [0], color="gray", lw=LW, ls="-",  label="Train")
     dash_patch  = plt.Line2D([0], [0], color="gray", lw=LW, ls="--", label="Validation")
-    fig.legend(handles=[solid_patch, dash_patch], loc="lower center",
-               ncol=2, fontsize=10, framealpha=0.8, bbox_to_anchor=(0.5, -0.04))
+    dot_patch   = plt.Line2D([0], [0], color="gray", lw=1.2, ls=":",  label="Early stop")
+
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles + [solid_patch, dash_patch, dot_patch],
+              labels  + ["Train", "Validation", "Early stop"],
+              fontsize=9, framealpha=0.8, loc="upper right")
 
     fig.tight_layout()
     out = out_dir / "training_curves.png"

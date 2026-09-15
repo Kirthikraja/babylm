@@ -63,6 +63,10 @@ WARMUP_RATIO = 0.01
 EVAL_SPLIT = 0.1           # 10% held-out for eval loss
 WORDS_PER_CHECKPOINT = 1_000_000   # 1 checkpoint per 1M words
 
+# ── Early stopping ──────────────────────────────────────────────────────────────
+EARLY_STOP_PATIENCE  = 3     # epochs without improvement before stopping
+EARLY_STOP_MIN_DELTA = 1e-4  # minimum decrease in val loss to count as improvement
+
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
 
@@ -178,14 +182,28 @@ def train(args: argparse.Namespace) -> None:
     scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
     # ── Training curves storage ───────────────────────────────────────────────
-    curves = {"condition": args.condition, "train_loss": [], "eval_loss": [], "step": [], "words_seen": []}
-    global_step = 0
-    words_seen = 0
-    accum_loss = 0.0
+    curves = {
+        "condition":        args.condition,
+        # step-level (every 1M words, for fine-grained view)
+        "train_loss":  [], "eval_loss":  [], "step": [], "words_seen": [],
+        # epoch-level (for the main training curve figure)
+        "epoch_num":        [],
+        "epoch_train_loss": [],
+        "epoch_eval_loss":  [],
+        "early_stopped_at": None,
+    }
+    curves_path   = results_dir / "training_curves.json"
+    global_step   = 0
+    words_seen    = 0
+    accum_loss    = 0.0
+    best_eval_loss    = float("inf")
+    patience_counter  = 0
     optimizer.zero_grad()
 
     for epoch in range(args.epochs):
         model.train()
+        epoch_step_losses: list[float] = []
+
         for step, batch in enumerate(train_loader):
             batch = {k: v.to(device) for k, v in batch.items()}
             out = model(**batch)
@@ -203,6 +221,7 @@ def train(args: argparse.Namespace) -> None:
 
                 train_loss = accum_loss * args.grad_accum / args.grad_accum
                 accum_loss = 0.0
+                epoch_step_losses.append(train_loss)
 
                 log.info("epoch=%d  step=%d/%d  train_loss=%.4f  lr=%.2e  words=%.1fM",
                          epoch + 1, global_step, total_steps, train_loss,
@@ -222,9 +241,37 @@ def train(args: argparse.Namespace) -> None:
                     curves["train_loss"].append(round(train_loss, 4))
                     curves["eval_loss"].append(round(eval_loss, 4))
 
-                    curves_path = results_dir / "training_curves.json"
                     curves_path.write_text(json.dumps(curves, indent=2), encoding="utf-8")
                     log.info("  Curves saved -> %s", curves_path)
+
+        # ── End of epoch: epoch-level eval + early stopping ──────────────────
+        epoch_train_loss = float(sum(epoch_step_losses) / len(epoch_step_losses)) if epoch_step_losses else float("inf")
+        epoch_eval_loss  = compute_eval_loss(model, eval_loader, device)
+
+        curves["epoch_num"].append(epoch + 1)
+        curves["epoch_train_loss"].append(round(epoch_train_loss, 4))
+        curves["epoch_eval_loss"].append(round(epoch_eval_loss, 4))
+
+        log.info("EPOCH %d/%d DONE  epoch_train=%.4f  epoch_eval=%.4f  ppl=%.2f",
+                 epoch + 1, args.epochs, epoch_train_loss, epoch_eval_loss,
+                 math.exp(epoch_eval_loss))
+
+        # Improvement check
+        if epoch_eval_loss < best_eval_loss - EARLY_STOP_MIN_DELTA:
+            best_eval_loss   = epoch_eval_loss
+            patience_counter = 0
+            model.save_pretrained(out_dir / "best")
+            log.info("  New best val loss %.4f — saved best model", best_eval_loss)
+        else:
+            patience_counter += 1
+            log.info("  No improvement (%d/%d patience)", patience_counter, EARLY_STOP_PATIENCE)
+            if patience_counter >= EARLY_STOP_PATIENCE:
+                log.info("EARLY STOPPING at epoch %d", epoch + 1)
+                curves["early_stopped_at"] = epoch + 1
+                curves_path.write_text(json.dumps(curves, indent=2), encoding="utf-8")
+                break
+
+        curves_path.write_text(json.dumps(curves, indent=2), encoding="utf-8")
 
     # Final model
     model.save_pretrained(out_dir / "final")
