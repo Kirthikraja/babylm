@@ -33,6 +33,8 @@ MASK_TOKEN = "[MASK]"
 def location_log_prob(model, tokenizer, context, location, device):
     ctx_ids = tokenizer.encode(context, add_special_tokens=False)
     loc_ids = tokenizer.encode(" " + location.strip(), add_special_tokens=False)
+    if not ctx_ids or not loc_ids:
+        return float("-inf")
     input_ids = torch.tensor([ctx_ids + loc_ids]).to(device)
     with torch.no_grad():
         logits = model(input_ids).logits[0]
