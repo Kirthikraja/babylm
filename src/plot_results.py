@@ -649,6 +649,73 @@ def plot_blimp_vs_ewok(results_dir: Path, out_dir: Path) -> None:
     log.info("Saved: %s", out)
 
 
+# ── Figure 8: Accuracy over training (Figure-10 style) ───────────────────────
+
+def load_checkpoint_evals(results_dir: Path, condition: str) -> dict | None:
+    p = results_dir / condition / "checkpoint_evals.json"
+    if not p.exists():
+        log.warning("Not found: %s", p)
+        return None
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def plot_checkpoint_accuracy(results_dir: Path, out_dir: Path) -> None:
+    # Colours matching Figure 10: BLiMP purple, FBT green, TB blue, FB pink
+    C_BLIMP = "#9467bd"
+    C_FBT   = "#2ca02c"
+    C_TB    = "#aec7e8"
+    C_FB    = "#ffbb78"
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    plotted = False
+
+    for cond in CONDITIONS_ALL:
+        data = load_checkpoint_evals(results_dir, cond)
+        if data is None:
+            continue
+        ckpts = data.get("checkpoints", [])
+        if not ckpts:
+            continue
+
+        words  = [c["words_seen"] / 1_000_000 for c in ckpts if c.get("words_seen")]
+        fbt    = [c["fbt_overall"]      for c in ckpts if c.get("words_seen")]
+        fb     = [c["fbt_false_belief"] for c in ckpts if c.get("words_seen")]
+        tb     = [c["fbt_true_belief"]  for c in ckpts if c.get("words_seen")]
+        has_blimp = all("blimp" in c for c in ckpts)
+        blimp  = [c["blimp"] for c in ckpts if c.get("words_seen")] if has_blimp else []
+
+        col = COLORS[cond]
+        lbl = LABELS[cond]
+
+        if has_blimp and blimp:
+            ax.plot(words, blimp, color=C_BLIMP, lw=LW, ls="-",
+                    label=f"BLiMP ({lbl})" if cond == CONDITIONS_ALL[0] else "_")
+        ax.plot(words, fbt, color=col, lw=LW,  ls="-",  label=f"FB Overall – {lbl}")
+        ax.plot(words, tb,  color=col, lw=0.8, ls="--", alpha=0.6,
+                label=f"True Belief – {lbl}")
+        ax.plot(words, fb,  color=col, lw=0.8, ls=":",  alpha=0.6,
+                label=f"False Belief – {lbl}")
+        plotted = True
+
+    if not plotted:
+        log.warning("No checkpoint_evals.json found — skipping Figure 8")
+        plt.close(fig)
+        return
+
+    ax.axhline(CHANCE, color="gray", lw=1, ls=":", label="Chance (0.50)")
+    ax.set_xlabel("Words Seen (M)", fontsize=12)
+    ax.set_ylabel("Accuracy", fontsize=12)
+    ax.set_ylim(0.1, 1.0)
+    ax.set_title("BLiMP & FBT Accuracy over Training", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=8, framealpha=0.8, loc="lower right", ncol=2)
+
+    fig.tight_layout()
+    out = out_dir / "checkpoint_accuracy.png"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    log.info("Saved: %s", out)
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
@@ -665,10 +732,11 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     log.info("Output directory: %s", out_dir)
 
-    plot_training_curves(args.results_dir, out_dir)       # Fig 1: loss curves (chunked vs flat)
-    plot_fbt_belief_condition(args.results_dir, out_dir)  # Fig 2: FB vs TB accuracy (main result)
+    plot_training_curves(args.results_dir, out_dir)       # Fig 1: loss curves
+    plot_fbt_belief_condition(args.results_dir, out_dir)  # Fig 2: FB vs TB accuracy
     plot_fbt_breakdown(args.results_dir, out_dir)         # Fig 3: 2x2 condition x cue
     plot_eval_summary(args.results_dir, out_dir)          # Fig 4: BLiMP + EWoK summary
+    plot_checkpoint_accuracy(args.results_dir, out_dir)   # Fig 8: accuracy over training
 
     log.info("Done. Figures saved to %s", out_dir)
 
