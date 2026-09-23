@@ -660,14 +660,11 @@ def load_checkpoint_evals(results_dir: Path, condition: str) -> dict | None:
 
 
 def plot_checkpoint_accuracy(results_dir: Path, out_dir: Path) -> None:
-    # Colours matching Figure 10: BLiMP purple, FBT green, TB blue, FB pink
     C_BLIMP = "#9467bd"
-    C_FBT   = "#2ca02c"
-    C_TB    = "#aec7e8"
-    C_FB    = "#ffbb78"
 
     fig, ax = plt.subplots(figsize=(10, 5))
     plotted = False
+    xlabel_str = "Words Seen (M)"
 
     for cond in CONDITIONS_ALL:
         data = load_checkpoint_evals(results_dir, cond)
@@ -677,23 +674,30 @@ def plot_checkpoint_accuracy(results_dir: Path, out_dir: Path) -> None:
         if not ckpts:
             continue
 
-        words  = [c["words_seen"] / 1_000_000 for c in ckpts if c.get("words_seen")]
-        fbt    = [c["fbt_overall"]      for c in ckpts if c.get("words_seen")]
-        fb     = [c["fbt_false_belief"] for c in ckpts if c.get("words_seen")]
-        tb     = [c["fbt_true_belief"]  for c in ckpts if c.get("words_seen")]
+        has_words = any(c.get("words_seen") for c in ckpts)
+        if has_words:
+            xs    = [c["words_seen"] / 1_000_000 for c in ckpts]
+            xlabel_str = "Words Seen (M)"
+        else:
+            xs    = [c["step"] for c in ckpts]
+            xlabel_str = "Training Step"
+
+        fbt    = [c["fbt_overall"]      for c in ckpts]
+        fb     = [c["fbt_false_belief"] for c in ckpts]
+        tb     = [c["fbt_true_belief"]  for c in ckpts]
         has_blimp = all("blimp" in c for c in ckpts)
-        blimp  = [c["blimp"] for c in ckpts if c.get("words_seen")] if has_blimp else []
+        blimp  = [c["blimp"] for c in ckpts] if has_blimp else []
 
         col = COLORS[cond]
         lbl = LABELS[cond]
 
         if has_blimp and blimp:
-            ax.plot(words, blimp, color=C_BLIMP, lw=LW, ls="-",
+            ax.plot(xs, blimp, color=C_BLIMP, lw=LW, ls="-",
                     label=f"BLiMP ({lbl})" if cond == CONDITIONS_ALL[0] else "_")
-        ax.plot(words, fbt, color=col, lw=LW,  ls="-",  label=f"FB Overall – {lbl}")
-        ax.plot(words, tb,  color=col, lw=0.8, ls="--", alpha=0.6,
+        ax.plot(xs, fbt, color=col, lw=LW,   ls="-",  label=f"FB Overall – {lbl}")
+        ax.plot(xs, tb,  color=col, lw=1.2,  ls="--", alpha=0.8,
                 label=f"True Belief – {lbl}")
-        ax.plot(words, fb,  color=col, lw=0.8, ls=":",  alpha=0.6,
+        ax.plot(xs, fb,  color=col, lw=1.2,  ls=":",  alpha=0.8,
                 label=f"False Belief – {lbl}")
         plotted = True
 
@@ -703,7 +707,7 @@ def plot_checkpoint_accuracy(results_dir: Path, out_dir: Path) -> None:
         return
 
     ax.axhline(CHANCE, color="gray", lw=1, ls=":", label="Chance (0.50)")
-    ax.set_xlabel("Words Seen (M)", fontsize=12)
+    ax.set_xlabel(xlabel_str, fontsize=12)
     ax.set_ylabel("Accuracy", fontsize=12)
     ax.set_ylim(0.1, 1.0)
     ax.set_title("BLiMP & FBT Accuracy over Training", fontsize=13, fontweight="bold")
