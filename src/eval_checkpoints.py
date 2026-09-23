@@ -173,6 +173,18 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info("Device: %s", device)
 
+    # Load tokenizer once — it doesn't change between checkpoints. Early checkpoints
+    # often don't save tokenizer files, so loading per-checkpoint silently falls back
+    # to a broken/default tokenizer, making encode() return empty lists → all -inf → 0.0 scores.
+    first_ckpt_with_tokenizer = next(
+        (d for d in checkpoints if (d / "tokenizer.json").exists()
+         or (d / "vocab.json").exists()),
+        None,
+    )
+    tokenizer_path = str(first_ckpt_with_tokenizer) if first_ckpt_with_tokenizer else "gpt2"
+    log.info("Loading tokenizer from: %s", tokenizer_path)
+    tokenizer = GPT2TokenizerFast.from_pretrained(tokenizer_path)
+
     checkpoint_results = []
 
     for ckpt in checkpoints:
@@ -182,7 +194,6 @@ def main():
         log.info("── checkpoint-%d  (%.1fM words) ──",
                  step, (words_seen or 0) / 1_000_000)
 
-        tokenizer = GPT2TokenizerFast.from_pretrained(str(ckpt))
         model     = GPT2LMHeadModel.from_pretrained(str(ckpt)).to(device)
         model.eval()
 
