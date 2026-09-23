@@ -659,65 +659,62 @@ def load_checkpoint_evals(results_dir: Path, condition: str) -> dict | None:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
-def plot_checkpoint_accuracy(results_dir: Path, out_dir: Path) -> None:
+def _plot_checkpoint_accuracy_single(
+    results_dir: Path, out_dir: Path, cond: str
+) -> None:
+    """One figure per condition."""
     C_BLIMP = "#9467bd"
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    plotted = False
-    xlabel_str = "Words Seen (M)"
-
-    for cond in CONDITIONS_ALL:
-        data = load_checkpoint_evals(results_dir, cond)
-        if data is None:
-            continue
-        ckpts = data.get("checkpoints", [])
-        if not ckpts:
-            continue
-
-        has_words = any(c.get("words_seen") for c in ckpts)
-        if has_words:
-            xs    = [c["words_seen"] / 1_000_000 for c in ckpts]
-            xlabel_str = "Words Seen (M)"
-        else:
-            xs    = [c["step"] for c in ckpts]
-            xlabel_str = "Training Step"
-
-        fbt    = [c["fbt_overall"]      for c in ckpts]
-        fb     = [c["fbt_false_belief"] for c in ckpts]
-        tb     = [c["fbt_true_belief"]  for c in ckpts]
-        has_blimp = all("blimp" in c for c in ckpts)
-        blimp  = [c["blimp"] for c in ckpts] if has_blimp else []
-
-        col = COLORS[cond]
-        lbl = LABELS[cond]
-
-        if has_blimp and blimp:
-            ax.plot(xs, blimp, color=C_BLIMP, lw=LW, ls="-",
-                    label=f"BLiMP ({lbl})" if cond == CONDITIONS_ALL[0] else "_")
-        ax.plot(xs, fbt, color=col, lw=LW,   ls="-",  label=f"FB Overall – {lbl}")
-        ax.plot(xs, tb,  color=col, lw=1.2,  ls="--", alpha=0.8,
-                label=f"True Belief – {lbl}")
-        ax.plot(xs, fb,  color=col, lw=1.2,  ls=":",  alpha=0.8,
-                label=f"False Belief – {lbl}")
-        plotted = True
-
-    if not plotted:
-        log.warning("No checkpoint_evals.json found — skipping Figure 8")
-        plt.close(fig)
+    data = load_checkpoint_evals(results_dir, cond)
+    if data is None:
         return
+    ckpts = data.get("checkpoints", [])
+    if not ckpts:
+        log.warning("No checkpoints in data for %s — skipping", cond)
+        return
+
+    has_words = any(c.get("words_seen") for c in ckpts)
+    if has_words:
+        xs        = [c["words_seen"] / 1_000_000 for c in ckpts]
+        xlabel_str = "Words Seen (M)"
+    else:
+        xs        = [c["step"] for c in ckpts]
+        xlabel_str = "Training Step"
+
+    fbt       = [c["fbt_overall"]      for c in ckpts]
+    fb        = [c["fbt_false_belief"] for c in ckpts]
+    tb        = [c["fbt_true_belief"]  for c in ckpts]
+    has_blimp = all("blimp" in c for c in ckpts)
+    blimp     = [c["blimp"] for c in ckpts] if has_blimp else []
+
+    col = COLORS[cond]
+    lbl = LABELS[cond]
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    if has_blimp and blimp:
+        ax.plot(xs, blimp, color=C_BLIMP, lw=LW, ls="-", label="BLiMP")
+    ax.plot(xs, fbt, color=col, lw=LW,  ls="-",  label="FBT Overall")
+    ax.plot(xs, tb,  color=col, lw=1.4, ls="--", alpha=0.85, label="True Belief")
+    ax.plot(xs, fb,  color=col, lw=1.4, ls=":",  alpha=0.85, label="False Belief")
 
     ax.axhline(CHANCE, color="gray", lw=1, ls=":", label="Chance (0.50)")
     ax.set_xlabel(xlabel_str, fontsize=12)
     ax.set_ylabel("Accuracy", fontsize=12)
-    ax.set_ylim(0.1, 1.0)
-    ax.set_title("BLiMP & FBT Accuracy over Training", fontsize=13, fontweight="bold")
-    ax.legend(fontsize=8, framealpha=0.8, loc="lower right", ncol=2)
+    ax.set_ylim(0.2, 0.9)
+    ax.set_title(f"FBT Accuracy over Training — {lbl}", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10, framealpha=0.8, loc="lower right")
 
     fig.tight_layout()
-    out = out_dir / "checkpoint_accuracy.png"
+    out = out_dir / f"checkpoint_accuracy_{cond}.png"
     fig.savefig(out, bbox_inches="tight")
     plt.close(fig)
     log.info("Saved: %s", out)
+
+
+def plot_checkpoint_accuracy(results_dir: Path, out_dir: Path) -> None:
+    for cond in CONDITIONS_ALL:
+        _plot_checkpoint_accuracy_single(results_dir, out_dir, cond)
 
 
 # ── Entry point ────────────────────────────────────────────────────────────────
