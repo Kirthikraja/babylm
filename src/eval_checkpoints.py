@@ -185,11 +185,28 @@ def main():
     log.info("Loading tokenizer from: %s", tokenizer_path)
     tokenizer = GPT2TokenizerFast.from_pretrained(tokenizer_path)
 
-    checkpoint_results = []
+    out_path = results_dir / "checkpoint_evals.json"
+
+    # Resume from existing results if present
+    done_steps: set[int] = set()
+    checkpoint_results: list[dict] = []
+    if out_path.exists():
+        try:
+            prev = json.loads(out_path.read_text(encoding="utf-8"))
+            checkpoint_results = prev.get("checkpoints", [])
+            done_steps = {e["step"] for e in checkpoint_results}
+            log.info("Resuming: %d checkpoints already done, %d remaining",
+                     len(done_steps), len(checkpoints) - len(done_steps))
+        except Exception as exc:
+            log.warning("Could not load existing results (%s) — starting fresh", exc)
 
     for ckpt in checkpoints:
         step       = int(ckpt.name.split("-")[1])
         words_seen = step_to_words.get(step)
+
+        if step in done_steps:
+            log.info("Skipping checkpoint-%d (already done)", step)
+            continue
 
         log.info("── checkpoint-%d  (%.1fM words) ──",
                  step, (words_seen or 0) / 1_000_000)
@@ -214,16 +231,17 @@ def main():
 
         checkpoint_results.append(entry)
 
+        # Save incrementally so a job timeout doesn't lose completed work
+        sorted_results = sorted(checkpoint_results, key=lambda e: e["step"])
+        out_path.write_text(
+            json.dumps({"condition": args.condition, "checkpoints": sorted_results}, indent=2),
+            encoding="utf-8",
+        )
+
         del model
         torch.cuda.empty_cache()
 
-    out = {
-        "condition":   args.condition,
-        "checkpoints": checkpoint_results,
-    }
-    out_path = results_dir / "checkpoint_evals.json"
-    out_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
-    log.info("Saved %d entries → %s", len(checkpoint_results), out_path)
+    log.info("Done. %d total entries in %s", len(checkpoint_results), out_path)
 
 
 if __name__ == "__main__":
