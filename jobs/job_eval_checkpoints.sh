@@ -37,7 +37,6 @@ echo "Python: $(which python)"
 
 python -u src/eval_checkpoints.py \
     --condition "$CONDITION" \
-    --fbt_only \
     $EXTRA_ARGS
 
 echo "Job finished: $(date)"

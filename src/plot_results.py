@@ -684,8 +684,8 @@ def _plot_checkpoint_accuracy_single(
     fbt       = [c["fbt_overall"]      for c in ckpts]
     fb        = [c["fbt_false_belief"] for c in ckpts]
     tb        = [c["fbt_true_belief"]  for c in ckpts]
-    has_blimp = all("blimp" in c for c in ckpts)
-    blimp     = [c["blimp"] for c in ckpts] if has_blimp else []
+    has_blimp = any("blimp" in c for c in ckpts)
+    blimp     = [c.get("blimp") for c in ckpts] if has_blimp else []
 
     col = COLORS[cond]
     lbl = LABELS[cond]
@@ -693,7 +693,10 @@ def _plot_checkpoint_accuracy_single(
     fig, ax = plt.subplots(figsize=(9, 5))
 
     if has_blimp and blimp:
-        ax.plot(xs, blimp, color=C_BLIMP, lw=LW, ls="-", label="BLiMP")
+        blimp_xs = [x for x, v in zip(xs, blimp) if v is not None]
+        blimp_ys = [v for v in blimp if v is not None]
+        if blimp_xs:
+            ax.plot(blimp_xs, blimp_ys, color=C_BLIMP, lw=LW, ls="-", label="BLiMP")
     ax.plot(xs, fbt, color=col, lw=LW,  ls="-",  label="FBT Overall")
     ax.plot(xs, tb,  color=col, lw=1.4, ls="--", alpha=0.85, label="True Belief")
     ax.plot(xs, fb,  color=col, lw=1.4, ls=":",  alpha=0.85, label="False Belief")
