@@ -37,13 +37,13 @@ def main() -> None:
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
-    log.info("Downloading BLiMP from HuggingFace (McGill-NLP/blimp)…")
-    ds = load_dataset("McGill-NLP/blimp", "all", split="train", trust_remote_code=True)
+    log.info("Downloading BLiMP from HuggingFace (nyu-mll/blimp)…")
+    ds = load_dataset("nyu-mll/blimp", "all", split="train")
 
     # Group by paradigm and write one .jsonl per paradigm
     by_paradigm: dict[str, list[dict]] = {}
     for row in ds:
-        paradigm = row.get("linguistics_term") or row.get("paradigm") or "unknown"
+        paradigm = row.get("linguistics_term") or row.get("field") or "unknown"
         by_paradigm.setdefault(paradigm, []).append({
             "sentence_good": row["sentence_good"],
             "sentence_bad":  row["sentence_bad"],
