@@ -3,21 +3,24 @@ src/train_gpt2.py
 
 Trains GPT-2 Small from scratch on a tokenized BabyLM dataset.
 
-Two conditions:
-  --condition chunked   : uses data/chunked_10M/*.jsonl (EOS at sentence boundaries)
-  --condition flat      : uses data/flat_10M/*.jsonl    (sliding-window, no EOS)
+Conditions:
+  --condition chunked   : uses data/chunked_10M/*.jsonl
+  --condition flat      : uses data/flat_10M/*.jsonl
+  --condition balanced  : uses data/balanced_10M/*.jsonl
 
-Checkpointing: saves 1 checkpoint per million words processed (10 for 10M corpus).
-Eval loss is computed on a 10% held-out split at every checkpoint.
-Training curves saved to results/<condition>/training_curves.json.
+Checkpointing: saves model + optimizer + scheduler + training state every 1M words.
+Resume: automatically detects the latest checkpoint and continues from there.
+        Just resubmit the same sbatch command — no extra flags needed.
 
 Usage:
-    python src/train_gpt2.py --condition chunked --corpus_scale 10M
-    python src/train_gpt2.py --condition flat    --corpus_scale 10M
+    python src/train_gpt2.py --condition flat --corpus_scale 100M
+    python src/train_gpt2.py --condition chunked --corpus_scale 100M
 """
 
 from __future__ import annotations
 import argparse
+import hashlib
+import itertools
 import json
 import logging
 import math
@@ -60,12 +63,12 @@ LR = 6e-4
 BATCH_SIZE = 4
 GRAD_ACCUM = 32            # effective batch = 128
 WARMUP_RATIO = 0.01
-EVAL_SPLIT = 0.1           # 10% held-out for eval loss
-WORDS_PER_CHECKPOINT = 1_000_000   # 1 checkpoint per 1M words
+EVAL_SPLIT = 0.1
+WORDS_PER_CHECKPOINT = 1_000_000
 
 # ── Early stopping ──────────────────────────────────────────────────────────────
-EARLY_STOP_PATIENCE  = 3     # epochs without improvement before stopping
-EARLY_STOP_MIN_DELTA = 1e-4  # minimum decrease in val loss to count as improvement
+EARLY_STOP_PATIENCE  = 3
+EARLY_STOP_MIN_DELTA = 1e-4
 
 
 # ── Dataset ───────────────────────────────────────────────────────────────────
@@ -95,40 +98,100 @@ class ChunkDataset(Dataset):
 def collate_fn(batch: list[dict], pad_id: int = 50256) -> dict:
     max_len = max(b["input_ids"].size(0) for b in batch)
     input_ids = torch.full((len(batch), max_len), pad_id, dtype=torch.long)
-    labels = torch.full((len(batch), max_len), -100, dtype=torch.long)
+    labels    = torch.full((len(batch), max_len), -100, dtype=torch.long)
     for i, b in enumerate(batch):
         L = b["input_ids"].size(0)
         input_ids[i, :L] = b["input_ids"]
-        labels[i, :L] = b["labels"]
+        labels[i, :L]    = b["labels"]
     attention_mask = (input_ids != pad_id).long()
     return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}
 
 
-# ── Eval loss ─────────────────────────────────────────────────────────────────
+# ── Eval ──────────────────────────────────────────────────────────────────────
 
-def compute_eval_loss(
-    model: GPT2LMHeadModel,
-    eval_loader: DataLoader,
-    device: torch.device,
-) -> float:
+def compute_eval_loss(model, eval_loader, device) -> float:
     model.eval()
-    total_loss, n_batches = 0.0, 0
+    total, n = 0.0, 0
     with torch.no_grad():
         for batch in eval_loader:
             batch = {k: v.to(device) for k, v in batch.items()}
-            out = model(**batch)
-            total_loss += out.loss.item()
-            n_batches += 1
+            total += model(**batch).loss.item()
+            n += 1
     model.train()
-    return total_loss / max(n_batches, 1)
+    return total / max(n, 1)
+
+
+# ── Data hash ─────────────────────────────────────────────────────────────────
+
+def compute_data_hash(data_dir: Path) -> str:
+    """MD5 of sorted JSONL filenames + line counts — detects data dir changes."""
+    files = sorted(data_dir.glob("*.jsonl"))
+    parts = []
+    for f in files:
+        with f.open("r", encoding="utf-8") as fh:
+            n = sum(1 for _ in fh)
+        parts.append(f"{f.name}:{n}")
+    return hashlib.md5("\n".join(parts).encode()).hexdigest()
+
+
+# ── Resume helpers ────────────────────────────────────────────────────────────
+
+def find_latest_checkpoint(out_dir: Path) -> tuple[Path | None, dict | None]:
+    """Return (checkpoint_path, state_dict) for the latest resumable checkpoint."""
+    if not out_dir.exists():
+        return None, None
+    ckpts = sorted(
+        [d for d in out_dir.iterdir()
+         if d.is_dir() and d.name.startswith("checkpoint-")
+         and (d / "training_state.pt").exists()],
+        key=lambda d: int(d.name.split("-")[1]),
+    )
+    if not ckpts:
+        return None, None
+    latest = ckpts[-1]
+    state = torch.load(latest / "training_state.pt", map_location="cpu",
+                       weights_only=False)
+    return latest, state
+
+
+def save_checkpoint(
+    out_dir: Path,
+    global_step: int,
+    model,
+    optimizer,
+    scheduler,
+    epoch: int,
+    batches_in_epoch: int,
+    words_seen: float,
+    best_eval_loss: float,
+    patience_counter: int,
+    curves: dict,
+    data_hash: str,
+) -> None:
+    ckpt_path = out_dir / f"checkpoint-{global_step}"
+    ckpt_path.mkdir(parents=True, exist_ok=True)
+    model.save_pretrained(ckpt_path)
+    torch.save(optimizer.state_dict(), ckpt_path / "optimizer.pt")
+    torch.save(scheduler.state_dict(), ckpt_path / "scheduler.pt")
+    torch.save({
+        "global_step":       global_step,
+        "epoch":             epoch,
+        "batches_in_epoch":  batches_in_epoch,
+        "words_seen":        words_seen,
+        "best_eval_loss":    best_eval_loss,
+        "patience_counter":  patience_counter,
+        "curves":            curves,
+        "data_hash":         data_hash,
+    }, ckpt_path / "training_state.pt")
+    log.info("  Checkpoint saved → %s", ckpt_path)
 
 
 # ── Training loop ──────────────────────────────────────────────────────────────
 
 def train(args: argparse.Namespace) -> None:
-    base = Path(__file__).parent.parent
-    data_dir = args.data_dir or base / "data" / f"{args.condition}_{args.corpus_scale}"
-    out_dir = args.output_dir or base / "models" / args.condition
+    base        = Path(__file__).parent.parent
+    data_dir    = args.data_dir or base / "data" / f"{args.condition}_{args.corpus_scale}"
+    out_dir     = args.output_dir or base / "models" / args.condition
     results_dir = base / "results" / args.condition
     out_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
@@ -138,10 +201,12 @@ def train(args: argparse.Namespace) -> None:
         log.error("No .jsonl files in %s", data_dir)
         sys.exit(1)
     log.info("Data dir: %s  (%d files)", data_dir, len(jsonl_files))
+    data_hash = compute_data_hash(data_dir)
+    log.info("Data hash: %s", data_hash)
 
-    # ── Train / eval split ────────────────────────────────────────────────────
+    # ── Dataset split (fixed seed so resume sees same split) ──────────────────
     full_dataset = ChunkDataset(jsonl_files)
-    n_eval = max(1, int(len(full_dataset) * EVAL_SPLIT))
+    n_eval  = max(1, int(len(full_dataset) * EVAL_SPLIT))
     n_train = len(full_dataset) - n_eval
     train_dataset, eval_dataset = random_split(
         full_dataset, [n_train, n_eval],
@@ -149,10 +214,6 @@ def train(args: argparse.Namespace) -> None:
     )
     log.info("Train: %d chunks  |  Eval: %d chunks", n_train, n_eval)
 
-    train_loader = DataLoader(
-        train_dataset, batch_size=args.batch_size, shuffle=True,
-        num_workers=4, pin_memory=True, collate_fn=lambda b: collate_fn(b),
-    )
     eval_loader = DataLoader(
         eval_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=2, pin_memory=True, collate_fn=lambda b: collate_fn(b),
@@ -161,58 +222,122 @@ def train(args: argparse.Namespace) -> None:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info("Device: %s", device)
 
-    config = GPT2Config(**GPT2_SMALL)
-    model = GPT2LMHeadModel(config).to(device)
-    log.info("GPT-2 Small: %d parameters", sum(p.numel() for p in model.parameters()))
+    # ── Step / checkpoint math (needed before resume load) ────────────────────
+    tokens_per_step    = args.batch_size * args.grad_accum * 1024
+    words_per_step     = tokens_per_step * 0.75
+    steps_per_epoch    = math.ceil(n_train / (args.batch_size * args.grad_accum))
+    total_steps        = steps_per_epoch * args.epochs
+    warmup_steps       = max(1, int(total_steps * WARMUP_RATIO))
+    steps_per_ckpt     = max(1, int(WORDS_PER_CHECKPOINT / words_per_step))
+    log.info("Total steps: %d  |  Steps/epoch: %d  |  Checkpoint every: %d steps",
+             total_steps, steps_per_epoch, steps_per_ckpt)
+
+    # ── Resume detection ──────────────────────────────────────────────────────
+    resume_ckpt, resume_state = find_latest_checkpoint(out_dir)
+
+    if resume_ckpt is not None:
+        log.info("=" * 60)
+        log.info("RESUMING from %s", resume_ckpt)
+        log.info("=" * 60)
+        stored_hash = resume_state.get("data_hash")
+        if stored_hash is None:
+            log.warning(
+                "Checkpoint predates data-hash safety check — cannot verify data "
+                "integrity. Proceeding, but consider retraining if source .jsonl "
+                "files may have changed since this checkpoint was saved."
+            )
+        elif stored_hash != data_hash:
+            log.error("=" * 60)
+            log.error("DATA MISMATCH DETECTED — REFUSING TO RESUME")
+            log.error("  Checkpoint trained on data_hash : %s", stored_hash)
+            log.error("  Current data directory hash     : %s", data_hash)
+            log.error("  The source .jsonl files in %s appear to have changed.", data_dir)
+            log.error("  Resuming would silently corrupt training. Either restore the")
+            log.error("  original data or delete this checkpoint and retrain from scratch.")
+            log.error("=" * 60)
+            sys.exit(1)
+        else:
+            log.info("Data hash verified — source data unchanged since checkpoint saved.")
+        model = GPT2LMHeadModel.from_pretrained(str(resume_ckpt)).to(device)
+        global_step      = resume_state["global_step"]
+        words_seen       = resume_state["words_seen"]
+        best_eval_loss   = resume_state["best_eval_loss"]
+        patience_counter = resume_state["patience_counter"]
+        curves           = resume_state["curves"]
+        resume_epoch     = resume_state["epoch"]
+        resume_batches   = resume_state["batches_in_epoch"]
+        log.info("Resuming at global_step=%d  epoch=%d  batches_in_epoch=%d  words=%.1fM",
+                 global_step, resume_epoch + 1, resume_batches, words_seen / 1_000_000)
+    else:
+        log.info("No resumable checkpoint found — starting fresh")
+        model = GPT2LMHeadModel(GPT2Config(**GPT2_SMALL)).to(device)
+        log.info("GPT-2 Small: %d parameters", sum(p.numel() for p in model.parameters()))
+        global_step      = 0
+        words_seen       = 0.0
+        best_eval_loss   = float("inf")
+        patience_counter = 0
+        curves           = {
+            "condition":        args.condition,
+            "train_loss":       [], "eval_loss":        [],
+            "step":             [], "words_seen":        [],
+            "epoch_num":        [], "epoch_train_loss":  [],
+            "epoch_eval_loss":  [], "early_stopped_at":  None,
+        }
+        resume_epoch   = -1
+        resume_batches = 0
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.1)
-    steps_per_epoch = math.ceil(n_train / (args.batch_size * args.grad_accum))
-    total_steps = steps_per_epoch * args.epochs
-    warmup_steps = max(1, int(total_steps * WARMUP_RATIO))
-
-    # Checkpoint every 1M words — convert to steps
-    # avg tokens per chunk ≈ 1024; avg words per token ≈ 0.75
-    tokens_per_step = args.batch_size * args.grad_accum * 1024
-    words_per_step = tokens_per_step * 0.75
-    steps_per_checkpoint = max(1, int(WORDS_PER_CHECKPOINT / words_per_step))
-    n_checkpoints = math.ceil(total_steps / steps_per_checkpoint)
-    log.info("Total steps: %d  |  Checkpoint every %d steps  |  ~%d checkpoints",
-             total_steps, steps_per_checkpoint, n_checkpoints)
-
     scheduler = get_cosine_schedule_with_warmup(optimizer, warmup_steps, total_steps)
 
-    # ── Training curves storage ───────────────────────────────────────────────
-    curves = {
-        "condition":        args.condition,
-        # step-level (every 1M words, for fine-grained view)
-        "train_loss":  [], "eval_loss":  [], "step": [], "words_seen": [],
-        # epoch-level (for the main training curve figure)
-        "epoch_num":        [],
-        "epoch_train_loss": [],
-        "epoch_eval_loss":  [],
-        "early_stopped_at": None,
-    }
-    curves_path   = results_dir / "training_curves.json"
-    global_step   = 0
-    words_seen    = 0
-    accum_loss    = 0.0
-    best_eval_loss    = float("inf")
-    patience_counter  = 0
+    if resume_ckpt is not None:
+        optimizer.load_state_dict(
+            torch.load(resume_ckpt / "optimizer.pt", map_location=device,
+                       weights_only=False))
+        scheduler.load_state_dict(
+            torch.load(resume_ckpt / "scheduler.pt", map_location="cpu",
+                       weights_only=False))
+
+    curves_path = results_dir / "training_curves.json"
     optimizer.zero_grad()
 
+    # ── Epoch loop ────────────────────────────────────────────────────────────
     for epoch in range(args.epochs):
+
+        if epoch < resume_epoch:
+            log.info("Skipping epoch %d (already completed)", epoch + 1)
+            continue
+
+        # Per-epoch shuffle seed → same order whether fresh or resumed
+        train_loader = DataLoader(
+            train_dataset, batch_size=args.batch_size, shuffle=True,
+            generator=torch.Generator().manual_seed(42 + epoch),
+            num_workers=4, pin_memory=True, collate_fn=lambda b: collate_fn(b),
+        )
+
+        # Skip batches already processed in the resume epoch
+        skip_batches    = resume_batches if epoch == resume_epoch else 0
+        batches_in_epoch = skip_batches
+
+        if skip_batches > 0:
+            log.info("Epoch %d: skipping first %d batches (already done in previous run)",
+                     epoch + 1, skip_batches)
+
         model.train()
+        accum_loss = 0.0
         epoch_step_losses: list[float] = []
 
-        for step, batch in enumerate(train_loader):
-            batch = {k: v.to(device) for k, v in batch.items()}
-            out = model(**batch)
-            loss = out.loss / args.grad_accum
-            loss.backward()
-            accum_loss += loss.item()
-            words_seen += args.batch_size * 1024 * 0.75  # approx words in this batch
+        loader = itertools.islice(train_loader, skip_batches, None)
 
-            if (step + 1) % args.grad_accum == 0:
+        for batch in loader:
+            batch = {k: v.to(device) for k, v in batch.items()}
+            out   = model(**batch)
+            loss  = out.loss / args.grad_accum
+            loss.backward()
+            accum_loss   += loss.item()
+            batches_in_epoch += 1
+            words_seen   += args.batch_size * 1024 * 0.75
+
+            if batches_in_epoch % args.grad_accum == 0:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 scheduler.step()
@@ -227,41 +352,43 @@ def train(args: argparse.Namespace) -> None:
                          epoch + 1, global_step, total_steps, train_loss,
                          scheduler.get_last_lr()[0], words_seen / 1_000_000)
 
-                # ── Checkpoint + eval every N steps ──────────────────────────
-                if global_step % steps_per_checkpoint == 0 or global_step == total_steps:
+                if global_step % steps_per_ckpt == 0 or global_step == total_steps:
                     eval_loss = compute_eval_loss(model, eval_loader, device)
-                    log.info("  CHECKPOINT  step=%d  eval_loss=%.4f  eval_ppl=%.2f",
+                    log.info("  CHECKPOINT  step=%d  eval_loss=%.4f  ppl=%.2f",
                              global_step, eval_loss, math.exp(eval_loss))
-
-                    ckpt_path = out_dir / f"checkpoint-{global_step}"
-                    model.save_pretrained(ckpt_path)
 
                     curves["step"].append(global_step)
                     curves["words_seen"].append(round(words_seen))
                     curves["train_loss"].append(round(train_loss, 4))
                     curves["eval_loss"].append(round(eval_loss, 4))
-
                     curves_path.write_text(json.dumps(curves, indent=2), encoding="utf-8")
-                    log.info("  Curves saved -> %s", curves_path)
 
-        # ── End of epoch: epoch-level eval + early stopping ──────────────────
-        epoch_train_loss = float(sum(epoch_step_losses) / len(epoch_step_losses)) if epoch_step_losses else float("inf")
+                    save_checkpoint(
+                        out_dir, global_step, model, optimizer, scheduler,
+                        epoch, batches_in_epoch, words_seen,
+                        best_eval_loss, patience_counter, curves,
+                        data_hash=data_hash,
+                    )
+
+        # ── End of epoch ──────────────────────────────────────────────────────
+        epoch_train_loss = (sum(epoch_step_losses) / len(epoch_step_losses)
+                            if epoch_step_losses else float("inf"))
         epoch_eval_loss  = compute_eval_loss(model, eval_loader, device)
 
         curves["epoch_num"].append(epoch + 1)
         curves["epoch_train_loss"].append(round(epoch_train_loss, 4))
         curves["epoch_eval_loss"].append(round(epoch_eval_loss, 4))
+        curves_path.write_text(json.dumps(curves, indent=2), encoding="utf-8")
 
-        log.info("EPOCH %d/%d DONE  epoch_train=%.4f  epoch_eval=%.4f  ppl=%.2f",
+        log.info("EPOCH %d/%d  train=%.4f  val=%.4f  ppl=%.2f",
                  epoch + 1, args.epochs, epoch_train_loss, epoch_eval_loss,
                  math.exp(epoch_eval_loss))
 
-        # Improvement check
         if epoch_eval_loss < best_eval_loss - EARLY_STOP_MIN_DELTA:
             best_eval_loss   = epoch_eval_loss
             patience_counter = 0
             model.save_pretrained(out_dir / "best")
-            log.info("  New best val loss %.4f — saved best model", best_eval_loss)
+            log.info("  New best val loss %.4f → saved best/", best_eval_loss)
         else:
             patience_counter += 1
             log.info("  No improvement (%d/%d patience)", patience_counter, EARLY_STOP_PATIENCE)
@@ -271,27 +398,27 @@ def train(args: argparse.Namespace) -> None:
                 curves_path.write_text(json.dumps(curves, indent=2), encoding="utf-8")
                 break
 
-        curves_path.write_text(json.dumps(curves, indent=2), encoding="utf-8")
+        # After completing the resume epoch, clear skip so next epochs run fully
+        resume_batches = 0
 
-    # Final model
+    # ── Final model ───────────────────────────────────────────────────────────
     model.save_pretrained(out_dir / "final")
     tokenizer_path = base / "tokenizer"
     src = str(tokenizer_path) if tokenizer_path.exists() else "gpt2"
     GPT2TokenizerFast.from_pretrained(src).save_pretrained(out_dir / "final")
-    log.info("Training complete. Final model -> %s/final", out_dir)
-    log.info("Training curves -> %s/training_curves.json", results_dir)
+    log.info("Training complete. Final model → %s/final", out_dir)
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--condition", choices=["chunked", "flat", "balanced"], required=True)
+    p.add_argument("--condition",    choices=["chunked", "flat", "balanced"], required=True)
     p.add_argument("--corpus_scale", choices=["10M", "100M"], default="10M")
-    p.add_argument("--data_dir", type=Path, default=None)
-    p.add_argument("--output_dir", type=Path, default=None)
-    p.add_argument("--epochs", type=int, default=1)
-    p.add_argument("--batch_size", type=int, default=BATCH_SIZE)
-    p.add_argument("--grad_accum", type=int, default=GRAD_ACCUM)
-    p.add_argument("--lr", type=float, default=LR)
+    p.add_argument("--data_dir",     type=Path, default=None)
+    p.add_argument("--output_dir",   type=Path, default=None)
+    p.add_argument("--epochs",       type=int,  default=1)
+    p.add_argument("--batch_size",   type=int,  default=BATCH_SIZE)
+    p.add_argument("--grad_accum",   type=int,  default=GRAD_ACCUM)
+    p.add_argument("--lr",           type=float, default=LR)
     return p.parse_args()
 
 
