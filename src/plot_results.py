@@ -717,6 +717,90 @@ def plot_checkpoint_accuracy(results_dir: Path, out_dir: Path) -> None:
         _plot_checkpoint_accuracy_single(results_dir, out_dir, cond)
 
 
+# ── Figure 9: Equalized three-way FBT comparison ─────────────────────────────
+
+def plot_equalized_fbt_comparison(
+    results_dir: Path,
+    out_dir: Path,
+    cap_words: float | None = None,
+) -> None:
+    """Two-panel fair comparison: all three conditions on a matched x-axis.
+
+    Top panel   : FBT Overall / True Belief / False Belief for all conditions,
+                  x-axis capped at the lowest training ceiling.
+    Bottom panel: FB − TB gap (bias severity) per condition.
+    """
+    all_data: dict[str, list[dict]] = {}
+    for cond in CONDITIONS_ALL:
+        d = load_checkpoint_evals(results_dir, cond)
+        if d is not None:
+            ckpts = [c for c in d.get("checkpoints", []) if c.get("words_seen") is not None]
+            if ckpts:
+                all_data[cond] = sorted(ckpts, key=lambda c: c["words_seen"])
+
+    if not all_data:
+        log.warning("No checkpoint_evals.json found — skipping equalized comparison")
+        return
+
+    if cap_words is None:
+        cap_words = min(max(c["words_seen"] for c in ckpts) for ckpts in all_data.values())
+        log.info("Equalized cap: %.2fM words (lowest ceiling across conditions)", cap_words / 1e6)
+
+    fig, (ax_top, ax_bot) = plt.subplots(
+        2, 1, figsize=(10, 8), sharex=True,
+        gridspec_kw={"height_ratios": [2, 1], "hspace": 0.08},
+    )
+
+    for cond, ckpts in all_data.items():
+        filtered = [c for c in ckpts if c["words_seen"] <= cap_words * 1.01]
+        if not filtered:
+            continue
+        xs  = [c["words_seen"] / 1e6 for c in filtered]
+        fbt = [c["fbt_overall"]      for c in filtered]
+        fb  = [c["fbt_false_belief"] for c in filtered]
+        tb  = [c["fbt_true_belief"]  for c in filtered]
+        gap = [f - t for f, t in zip(fb, tb)]
+
+        col = COLORS[cond]
+        lbl = LABELS[cond]
+        ax_top.plot(xs, fbt, color=col, lw=LW,  ls="-")
+        ax_top.plot(xs, tb,  color=col, lw=1.4, ls="--", alpha=0.75)
+        ax_top.plot(xs, fb,  color=col, lw=1.4, ls=":",  alpha=0.75)
+        ax_bot.plot(xs, gap, color=col, lw=LW,  ls="-",  label=lbl)
+
+    ax_top.axhline(CHANCE, color="gray", lw=1, ls=":", alpha=0.6)
+    ax_top.set_ylabel("Accuracy", fontsize=12)
+    ax_top.set_ylim(0.2, 0.9)
+    ax_top.set_title(
+        f"FBT Accuracy — Matched Exposure (cap: {cap_words/1e6:.1f}M words)",
+        fontsize=13, fontweight="bold",
+    )
+
+    # Legend: condition colour + line style separately
+    cond_patches = [mpatches.Patch(color=COLORS[c], label=LABELS[c]) for c in all_data]
+    style_lines  = [
+        plt.Line2D([0], [0], color="gray", lw=LW,  ls="-",  label="Overall"),
+        plt.Line2D([0], [0], color="gray", lw=1.4, ls="--", label="True Belief"),
+        plt.Line2D([0], [0], color="gray", lw=1.4, ls=":",  label="False Belief"),
+        plt.Line2D([0], [0], color="gray", lw=1,   ls=":",  alpha=0.6, label="Chance"),
+    ]
+    ax_top.legend(handles=cond_patches + style_lines,
+                  fontsize=8, framealpha=0.8, loc="upper right", ncol=2)
+
+    ax_bot.axhline(0, color="gray", lw=1, ls=":", alpha=0.6, label="No bias (gap = 0)")
+    ax_bot.set_xlabel("Words Seen (M)", fontsize=12)
+    ax_bot.set_ylabel("FB − TB Gap", fontsize=12)
+    ax_bot.set_title("Belief Bias Severity (False Belief − True Belief Accuracy)",
+                     fontsize=11)
+    ax_bot.legend(fontsize=9, framealpha=0.8, loc="upper right")
+
+    fig.tight_layout()
+    out = out_dir / "equalized_three_way_fbt_comparison.png"
+    fig.savefig(out, bbox_inches="tight")
+    plt.close(fig)
+    log.info("Saved: %s", out)
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
@@ -738,6 +822,7 @@ def main() -> None:
     plot_fbt_breakdown(args.results_dir, out_dir)         # Fig 3: 2x2 condition x cue
     plot_eval_summary(args.results_dir, out_dir)          # Fig 4: BLiMP + EWoK summary
     plot_checkpoint_accuracy(args.results_dir, out_dir)   # Fig 8: accuracy over training
+    plot_equalized_fbt_comparison(args.results_dir, out_dir)  # Fig 9: matched comparison
 
     log.info("Done. Figures saved to %s", out_dir)
 
