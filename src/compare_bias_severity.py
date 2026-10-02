@@ -118,15 +118,18 @@ def main() -> None:
         # Plain-language sentence
         gaps = {c: v["gap"] for c, v in row.items()}
         if len(gaps) > 1:
-            max_cond = max(gaps, key=gaps.get)
-            min_cond = min(gaps, key=gaps.get)
+            max_cond = max(gaps, key=lambda c: abs(gaps[c]))
+            min_cond = min(gaps, key=lambda c: abs(gaps[c]))
             print(f"\n    At matched exposure of {target/1e6:.1f}M words:")
             for cond, g in sorted(gaps.items(), key=lambda x: -x[1]):
                 print(f"      {LABELS.get(cond, cond)}: gap = {g:+.3f}")
-            if gaps[max_cond] > 0 and gaps[min_cond] >= 0:
-                ratio = gaps[max_cond] / max(gaps[min_cond], 1e-6)
+            if abs(gaps[min_cond]) > 0.01:
+                ratio = abs(gaps[max_cond]) / abs(gaps[min_cond])
                 print(f"    → {LABELS.get(max_cond, max_cond)} shows {ratio:.1f}× more bias than "
                       f"{LABELS.get(min_cond, min_cond)}")
+            elif abs(gaps[max_cond]) > 0.01:
+                print(f"    → {LABELS.get(min_cond, min_cond)} gap ≈ 0 (at chance); "
+                      f"{LABELS.get(max_cond, max_cond)} shows clear bias of {gaps[max_cond]:+.3f}")
         print()
 
     # ── Final summary at cap ──────────────────────────────────────────────────
