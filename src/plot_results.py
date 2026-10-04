@@ -51,15 +51,30 @@ CONDITIONS_ALL   = ["chunked", "flat", "balanced"]
 LABELS     = {"chunked": "EOS-Chunked", "flat": "Sliding-Window (Flat)", "balanced": "DENSITY-Balanced"}
 COLORS     = {"chunked": BLUE, "flat": ORANGE, "balanced": GREEN}
 
+# Semantic colors for False Belief / True Belief trajectories (matches reference figs)
+C_FB      = "#E8735A"    # coral  — False Belief line
+C_TB      = "#47A9A9"    # teal   — True Belief line
+C_OVERALL = "#555555"    # dark gray — FBT Overall in per-condition plots
+MARKERS   = {"chunked": "o", "flat": "s", "balanced": "^"}
+MARKER_SZ = 5
+
 plt.rcParams.update({
-    "font.family": "DejaVu Sans",
-    "axes.spines.top": False,
-    "axes.spines.right": False,
-    "axes.grid": True,
-    "axes.grid.axis": "y",
-    "grid.alpha": 0.3,
-    "grid.linestyle": "--",
-    "figure.dpi": 150,
+    "font.family":        "DejaVu Sans",
+    "font.size":          11,
+    "axes.facecolor":     "#f2f2f2",
+    "figure.facecolor":   "white",
+    "axes.grid":          True,
+    "grid.color":         "white",
+    "grid.linewidth":     1.2,
+    "grid.linestyle":     "-",
+    "axes.axisbelow":     True,
+    "axes.spines.top":    False,
+    "axes.spines.right":  False,
+    "axes.spines.left":   False,
+    "axes.spines.bottom": False,
+    "figure.dpi":         150,
+    "xtick.bottom":       False,
+    "ytick.left":         False,
 })
 
 # ── BLiMP category groupings (Warstadt et al. 2020) ──────────────────────────
@@ -234,9 +249,9 @@ def plot_training_curves(results_dir: Path, out_dir: Path) -> None:
         lbl = LABELS[cond]
 
         ax.plot(epochs, train_loss, color=col, lw=LW, linestyle="-",
-                label=f"{lbl} – Train")
+                marker="o", markersize=5, label=f"{lbl} – Train")
         ax.plot(epochs, eval_loss,  color=col, lw=LW, linestyle="--",
-                label=f"{lbl} – Validation")
+                marker="s", markersize=4, label=f"{lbl} – Validation")
 
         # Mark early stopping point with a vertical dotted line
         stopped_at = data.get("early_stopped_at")
@@ -270,7 +285,7 @@ def plot_training_curves(results_dir: Path, out_dir: Path) -> None:
 
     fig.tight_layout()
     out = out_dir / "training_curves.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
@@ -323,7 +338,7 @@ def plot_eval_summary(results_dir: Path, out_dir: Path) -> None:
 
     fig.tight_layout()
     out = out_dir / "eval_summary.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
@@ -362,17 +377,17 @@ def plot_fbt_belief_condition(results_dir: Path, out_dir: Path) -> None:
                 ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
                         f"{v:.2f}", ha="center", va="bottom", fontsize=10, fontweight="bold")
 
-    ax.axhline(CHANCE, color="gray", lw=1.2, ls=":", label="Chance (0.50)")
+    ax.axhline(CHANCE, color="#aaaaaa", lw=1.2, ls="--", label="Chance (0.50)")
     ax.set_xticks(x)
     ax.set_xticklabels(belief_types, fontsize=13)
-    ax.set_ylabel("Accuracy", fontsize=12)
+    ax.set_ylabel("P(Correct)", fontsize=12)
     ax.set_ylim(0, 1.05)
     ax.set_title("False Belief Test: Accuracy by Belief Condition", fontsize=13, fontweight="bold")
-    ax.legend(fontsize=10, framealpha=0.8)
+    ax.legend(fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc")
 
     fig.tight_layout()
     out = out_dir / "fbt_belief_condition.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
@@ -416,7 +431,7 @@ def plot_blimp_categories(results_dir: Path, out_dir: Path) -> None:
 
     fig.tight_layout()
     out = out_dir / "blimp_categories.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
@@ -476,7 +491,7 @@ def plot_zorro_paradigms(results_dir: Path, out_dir: Path) -> None:
 
     fig.tight_layout()
     out = out_dir / "zorro_paradigms.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
@@ -527,7 +542,7 @@ def plot_ewok_domains(results_dir: Path, out_dir: Path) -> None:
 
     fig.tight_layout()
     out = out_dir / "ewok_domains.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
@@ -575,17 +590,17 @@ def plot_fbt_breakdown(results_dir: Path, out_dir: Path) -> None:
                 ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.005,
                         f"{v:.2f}", ha="center", va="bottom", fontsize=8)
 
-    ax.axhline(CHANCE, color="gray", lw=1, ls=":", label="Chance (0.50)")
+    ax.axhline(CHANCE, color="#aaaaaa", lw=1.2, ls="--", label="Chance (0.50)")
     ax.set_xticks(x)
     ax.set_xticklabels(short_labels, fontsize=9)
-    ax.set_ylabel("Accuracy", fontsize=12)
+    ax.set_ylabel("P(Correct)", fontsize=12)
     ax.set_ylim(0, 1.05)
     ax.set_title("False Belief Test: Accuracy by Condition & Knowledge Cue", fontsize=13, fontweight="bold")
-    ax.legend(fontsize=10, framealpha=0.8)
+    ax.legend(fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc")
 
     fig.tight_layout()
     out = out_dir / "fbt_breakdown.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
@@ -644,7 +659,7 @@ def plot_blimp_vs_ewok(results_dir: Path, out_dir: Path) -> None:
 
     fig.tight_layout()
     out = out_dir / "blimp_vs_ewok_slope.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
@@ -662,7 +677,7 @@ def load_checkpoint_evals(results_dir: Path, condition: str) -> dict | None:
 def _plot_checkpoint_accuracy_single(
     results_dir: Path, out_dir: Path, cond: str
 ) -> None:
-    """One figure per condition."""
+    """One figure per condition — ggplot2-style academic layout."""
     C_BLIMP = "#9467bd"
 
     data = load_checkpoint_evals(results_dir, cond)
@@ -674,12 +689,8 @@ def _plot_checkpoint_accuracy_single(
         return
 
     has_words = any(c.get("words_seen") for c in ckpts)
-    if has_words:
-        xs        = [c["words_seen"] / 1_000_000 for c in ckpts]
-        xlabel_str = "Words Seen (M)"
-    else:
-        xs        = [c["step"] for c in ckpts]
-        xlabel_str = "Training Step"
+    xs         = [c["words_seen"] / 1_000_000 for c in ckpts] if has_words else [c["step"] for c in ckpts]
+    xlabel_str = "Words Seen (M)" if has_words else "Training Step"
 
     fbt       = [c["fbt_overall"]      for c in ckpts]
     fb        = [c["fbt_false_belief"] for c in ckpts]
@@ -687,27 +698,36 @@ def _plot_checkpoint_accuracy_single(
     has_blimp = all("blimp" in c for c in ckpts)
     blimp     = [c["blimp"] for c in ckpts] if has_blimp else []
 
-    col = COLORS[cond]
     lbl = LABELS[cond]
 
     fig, ax = plt.subplots(figsize=(9, 5))
 
-    if has_blimp and blimp:
-        ax.plot(xs, blimp, color=C_BLIMP, lw=LW, ls="-", label="BLiMP")
-    ax.plot(xs, fbt, color=col, lw=LW,  ls="-",  label="FBT Overall")
-    ax.plot(xs, tb,  color=col, lw=1.4, ls="--", alpha=0.85, label="True Belief")
-    ax.plot(xs, fb,  color=col, lw=1.4, ls=":",  alpha=0.85, label="False Belief")
+    # Shaded band between FB and TB shows gap at a glance
+    ax.fill_between(xs, tb, fb, alpha=0.10, color="#888888", zorder=1)
 
-    ax.axhline(CHANCE, color="gray", lw=1, ls=":", label="Chance (0.50)")
+    if has_blimp and blimp:
+        ax.plot(xs, blimp, color=C_BLIMP, lw=LW, ls="-", marker="D",
+                markersize=MARKER_SZ - 1, zorder=3, label="BLiMP")
+
+    ax.plot(xs, fb,  color=C_FB,      lw=2.0, ls="-",  marker="o",
+            markersize=MARKER_SZ,     zorder=4, label="False Belief")
+    ax.plot(xs, tb,  color=C_TB,      lw=2.0, ls="-",  marker="o",
+            markersize=MARKER_SZ,     zorder=4, label="True Belief")
+    ax.plot(xs, fbt, color=C_OVERALL, lw=1.6, ls="--", marker="s",
+            markersize=MARKER_SZ - 1, zorder=3, alpha=0.85, label="FBT Overall")
+
+    ax.axhline(CHANCE, color="#aaaaaa", lw=1.2, ls="--", zorder=1, label="Chance (0.50)")
+
     ax.set_xlabel(xlabel_str, fontsize=12)
-    ax.set_ylabel("Accuracy", fontsize=12)
-    ax.set_ylim(0.2, 0.9)
-    ax.set_title(f"FBT Accuracy over Training — {lbl}", fontsize=13, fontweight="bold")
-    ax.legend(fontsize=10, framealpha=0.8, loc="lower right")
+    ax.set_ylabel("P(Correct)", fontsize=12)
+    ax.set_ylim(0.15, 0.90)
+    ax.set_title(f"FBT Performance During Training — {lbl}", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10, frameon=True, facecolor="white",
+              edgecolor="#cccccc", loc="lower right")
 
     fig.tight_layout()
     out = out_dir / f"checkpoint_accuracy_{cond}.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
@@ -762,41 +782,47 @@ def plot_equalized_fbt_comparison(
         gap = [f - t for f, t in zip(fb, tb)]
 
         col = COLORS[cond]
-        lbl = LABELS[cond]
-        ax_top.plot(xs, fbt, color=col, lw=LW,  ls="-")
-        ax_top.plot(xs, tb,  color=col, lw=1.4, ls="--", alpha=0.75)
-        ax_top.plot(xs, fb,  color=col, lw=1.4, ls=":",  alpha=0.75)
-        ax_bot.plot(xs, gap, color=col, lw=LW,  ls="-",  label=lbl)
+        mk  = MARKERS.get(cond, "o")
+        ax_top.plot(xs, fbt, color=col, lw=2.0, ls="-",  marker=mk,
+                    markersize=MARKER_SZ, zorder=3)
+        ax_top.plot(xs, tb,  color=col, lw=1.5, ls="--", marker=mk,
+                    markersize=MARKER_SZ - 1, alpha=0.80, zorder=3)
+        ax_top.plot(xs, fb,  color=col, lw=1.5, ls=":",  marker=mk,
+                    markersize=MARKER_SZ - 1, alpha=0.80, zorder=3)
+        ax_bot.plot(xs, gap, color=col, lw=2.0, ls="-",  marker=mk,
+                    markersize=MARKER_SZ, zorder=3, label=LABELS[cond])
 
-    ax_top.axhline(CHANCE, color="gray", lw=1, ls=":", alpha=0.6)
-    ax_top.set_ylabel("Accuracy", fontsize=12)
-    ax_top.set_ylim(0.2, 0.9)
+    ax_top.axhline(CHANCE, color="#aaaaaa", lw=1.2, ls="--", zorder=1)
+    ax_top.set_ylabel("P(Correct)", fontsize=12)
+    ax_top.set_ylim(0.15, 0.90)
     ax_top.set_title(
         f"FBT Accuracy — Matched Exposure (cap: {cap_words/1e6:.1f}M words)",
         fontsize=13, fontweight="bold",
     )
 
-    # Legend: condition colour + line style separately
+    # Two-part legend: condition colour + line style
     cond_patches = [mpatches.Patch(color=COLORS[c], label=LABELS[c]) for c in all_data]
     style_lines  = [
-        plt.Line2D([0], [0], color="gray", lw=LW,  ls="-",  label="Overall"),
-        plt.Line2D([0], [0], color="gray", lw=1.4, ls="--", label="True Belief"),
-        plt.Line2D([0], [0], color="gray", lw=1.4, ls=":",  label="False Belief"),
-        plt.Line2D([0], [0], color="gray", lw=1,   ls=":",  alpha=0.6, label="Chance"),
+        plt.Line2D([0], [0], color="#555", lw=2.0, ls="-",  label="Overall"),
+        plt.Line2D([0], [0], color="#555", lw=1.5, ls="--", label="True Belief"),
+        plt.Line2D([0], [0], color="#555", lw=1.5, ls=":",  label="False Belief"),
+        plt.Line2D([0], [0], color="#aaa", lw=1.2, ls="--", label="Chance (0.50)"),
     ]
     ax_top.legend(handles=cond_patches + style_lines,
-                  fontsize=8, framealpha=0.8, loc="upper right", ncol=2)
+                  fontsize=8, frameon=True, facecolor="white",
+                  edgecolor="#cccccc", loc="upper right", ncol=2)
 
-    ax_bot.axhline(0, color="gray", lw=1, ls=":", alpha=0.6, label="No bias (gap = 0)")
+    ax_bot.axhline(0, color="#aaaaaa", lw=1.2, ls="--", zorder=1)
     ax_bot.set_xlabel("Words Seen (M)", fontsize=12)
     ax_bot.set_ylabel("FB − TB Gap", fontsize=12)
     ax_bot.set_title("Belief Bias Severity (False Belief − True Belief Accuracy)",
                      fontsize=11)
-    ax_bot.legend(fontsize=9, framealpha=0.8, loc="upper right")
+    ax_bot.legend(fontsize=9, frameon=True, facecolor="white",
+                  edgecolor="#cccccc", loc="upper right")
 
     fig.tight_layout()
     out = out_dir / "equalized_three_way_fbt_comparison.png"
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
 
