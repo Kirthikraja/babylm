@@ -62,7 +62,7 @@ GRAY  = "#555555"
 
 # ── Figure 1: Emergence curve for one layer ───────────────────────────────────
 
-def plot_emergence(records: list[dict], focus_layer: int, out_dir: Path) -> None:
+def plot_emergence(records: list[dict], focus_layer: int, out_dir: Path, condition: str = "") -> None:
     xs    = [r["words_seen"] / 1e6 for r in records if r.get("words_seen")]
     norms = [r["norms"][focus_layer] for r in records if r.get("words_seen")]
     cosims = [
@@ -114,7 +114,7 @@ def plot_emergence(records: list[dict], focus_layer: int, out_dir: Path) -> None
                loc="upper right")
 
     fig.tight_layout()
-    out = out_dir / "think_vector_emergence.png"
+    out = out_dir / f"think_vector_emergence_{condition}.png"
     fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
@@ -122,7 +122,7 @@ def plot_emergence(records: list[dict], focus_layer: int, out_dir: Path) -> None
 
 # ── Figure 2: All-layer CosSim heatmap ───────────────────────────────────────
 
-def plot_all_layers_heatmap(records: list[dict], out_dir: Path) -> None:
+def plot_all_layers_heatmap(records: list[dict], out_dir: Path, condition: str = "") -> None:
     records_with_cos = [r for r in records
                         if r.get("words_seen") and r.get("cosine_sim_to_final")]
     if not records_with_cos:
@@ -162,7 +162,7 @@ def plot_all_layers_heatmap(records: list[dict], out_dir: Path) -> None:
         sp.set_visible(False)
 
     fig.tight_layout()
-    out = out_dir / "think_vector_all_layers.png"
+    out = out_dir / f"think_vector_all_layers_{condition}.png"
     fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
@@ -175,6 +175,7 @@ def plot_fbt_overlay(
     fbt_path:   Path,
     focus_layer: int,
     out_dir:    Path,
+    condition:  str = "",
 ) -> None:
     if not fbt_path.exists():
         log.warning("checkpoint_evals.json not found at %s — skipping overlay", fbt_path)
@@ -235,7 +236,7 @@ def plot_fbt_overlay(
     ax1.grid(True, color="white", linewidth=1.2)
 
     fig.tight_layout()
-    out = out_dir / "think_vector_fbt_overlay.png"
+    out = out_dir / f"think_vector_fbt_overlay_{condition}.png"
     fig.savefig(out, bbox_inches="tight", facecolor="white")
     plt.close(fig)
     log.info("Saved: %s", out)
@@ -317,11 +318,11 @@ def main() -> None:
 
     print_emergence_stats(records, args.focus_layer)
 
-    plot_emergence(records, args.focus_layer, out_dir)
-    plot_all_layers_heatmap(records, out_dir)
+    plot_emergence(records, args.focus_layer, out_dir, condition=args.condition)
+    plot_all_layers_heatmap(records, out_dir, condition=args.condition)
 
     fbt_path = base / "results" / args.condition / "checkpoint_evals.json"
-    plot_fbt_overlay(records, fbt_path, args.focus_layer, out_dir)
+    plot_fbt_overlay(records, fbt_path, args.focus_layer, out_dir, condition=args.condition)
 
     log.info("Done. Figures saved to %s", out_dir)
 
