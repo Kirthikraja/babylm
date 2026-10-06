@@ -880,6 +880,84 @@ def plot_equalized_fbt_comparison(
     log.info("Saved: %s", out)
 
 
+# ── Figure 9b: Reference-style combined panel (BLiMP + FBT metrics) ──────────
+
+def _smooth(xs: np.ndarray, ys: np.ndarray, window: int = 15):
+    """Rolling mean. Trims edge artefacts introduced by zero-padding."""
+    if len(ys) < window:
+        return xs, ys
+    kernel  = np.ones(window) / window
+    ys_s    = np.convolve(ys, kernel, mode="same")
+    half    = window // 2
+    return xs[half:-half], ys_s[half:-half]
+
+
+def plot_training_panel_combined(results_dir: Path, out_dir: Path) -> None:
+    """
+    One figure per condition — exactly matches the supervisor reference style:
+      raw noisy trajectory (faded thin line) + smoothed bold line on top,
+      four metrics: BLiMP (purple), FBT Overall (green), True Belief (blue),
+      False Belief (pink).
+    """
+    C_BLIMP   = "#9467bd"   # purple
+    C_FBT_OV  = "#5b8c2a"   # olive green — FBT Overall
+    C_TB_LINE = "#5b9ec9"   # steel blue  — True Belief
+    C_FB_LINE = "#d9826a"   # dusty coral — False Belief
+    ALPHA_RAW = 0.22
+    SMOOTH_W  = 15
+
+    for cond in CONDITIONS_ALL:
+        data = load_checkpoint_evals(results_dir, cond)
+        if data is None:
+            continue
+        ckpts = sorted(
+            [c for c in data.get("checkpoints", []) if c.get("words_seen") is not None],
+            key=lambda c: c["words_seen"],
+        )
+        if not ckpts:
+            continue
+
+        xs        = np.array([c["words_seen"] / 1e6 for c in ckpts])
+        y_fbt     = np.array([c["fbt_overall"]      for c in ckpts], dtype=float)
+        y_tb      = np.array([c["fbt_true_belief"]  for c in ckpts], dtype=float)
+        y_fb      = np.array([c["fbt_false_belief"] for c in ckpts], dtype=float)
+        blimp_raw = np.array([c["blimp"] for c in ckpts if "blimp" in c], dtype=float)
+        xs_blimp  = np.array([c["words_seen"] / 1e6 for c in ckpts if "blimp" in c])
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        def _plot(x, y, color, label):
+            ax.plot(x, y, color=color, lw=0.8, alpha=ALPHA_RAW, zorder=2)
+            if len(x) >= SMOOTH_W:
+                xs_s, ys_s = _smooth(x, y, SMOOTH_W)
+                ax.plot(xs_s, ys_s, color=color, lw=2.2, zorder=4, label=label)
+            else:
+                ax.plot(x, y, color=color, lw=2.2, zorder=4, label=label)
+
+        if len(xs_blimp) > 0:
+            _plot(xs_blimp, blimp_raw, C_BLIMP,   "BLiMP")
+        _plot(xs, y_fbt, C_FBT_OV,  "FBT Overall")
+        _plot(xs, y_tb,  C_TB_LINE, "True Belief")
+        _plot(xs, y_fb,  C_FB_LINE, "False Belief")
+
+        ax.axhline(CHANCE, color="#aaaaaa", lw=1.2, ls="--", zorder=1)
+        ax.set_xlabel("Words Seen During Training (M)", fontsize=12)
+        ax.set_ylabel("Accuracy", fontsize=12)
+        ax.set_ylim(0.20, 1.0)
+        ax.set_title(
+            f"BLiMP & FBT Accuracy During Training — {LABELS[cond]}",
+            fontsize=13, fontweight="bold",
+        )
+        ax.legend(fontsize=10, frameon=True, facecolor="white",
+                  edgecolor="#cccccc", loc="lower right")
+
+        fig.tight_layout()
+        out = out_dir / f"training_panel_{cond}.png"
+        fig.savefig(out, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        log.info("Saved: %s", out)
+
+
 # ── Figure 10: FBT Explicit vs Implicit over training ────────────────────────
 
 def plot_fbt_knowledge_cue_over_training(results_dir: Path, out_dir: Path) -> None:
@@ -1046,6 +1124,7 @@ def main() -> None:
     plot_eval_summary(args.results_dir, out_dir)                 # Fig 4:  BLiMP + EWoK summary bar
     plot_checkpoint_accuracy(args.results_dir, out_dir)          # Fig 8:  FBT accuracy over training
     plot_equalized_fbt_comparison(args.results_dir, out_dir)     # Fig 9:  matched x-axis comparison
+    plot_training_panel_combined(args.results_dir, out_dir)          # Fig 9b: reference-style BLiMP+FBT panel
     plot_fbt_knowledge_cue_over_training(args.results_dir, out_dir)  # Fig 10: explicit/implicit over training
     plot_blimp_over_training(args.results_dir, out_dir)          # Fig 11: BLiMP over training
     plot_ewok_over_training(args.results_dir, out_dir)           # Fig 12: EWoK over training

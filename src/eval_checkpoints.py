@@ -199,8 +199,11 @@ def parse_args():
                    help="Path to fb.csv (default: data/fbt/fb.csv)")
     p.add_argument("--blimp_cache", type=Path, default=None,
                    help="Directory with BLiMP *.jsonl files")
-    p.add_argument("--ewok_cache",  type=Path, default=None,
+    p.add_argument("--ewok_cache",   type=Path, default=None,
                    help="Directory with EWoK *.jsonl files (default: data/ewok_cache)")
+    p.add_argument("--blimp_every_n", type=int, default=1,
+                   help="Run BLiMP only at every N-th checkpoint (default: 1 = every checkpoint). "
+                        "Use 10 for flat to stay within 4h SLURM limit.")
     return p.parse_args()
 
 
@@ -288,13 +291,15 @@ def main():
         except Exception as exc:
             log.warning("Could not load existing results (%s) — starting fresh", exc)
 
-    for ckpt in checkpoints:
+    for ckpt_idx, ckpt in enumerate(checkpoints):
         step       = int(ckpt.name.split("-")[1])
         words_seen = step_to_words.get(step)
 
         if step in done_steps:
             log.info("Skipping checkpoint-%d (already done)", step)
             continue
+
+        run_blimp = blimp_items and (ckpt_idx % args.blimp_every_n == 0)
 
         log.info("── checkpoint-%d  (%.1fM words) ──",
                  step, (words_seen or 0) / 1_000_000)
@@ -313,7 +318,7 @@ def main():
             v = fbt.get(key)
             entry[f"fbt_{key}"] = round(v, 4) if v is not None else None
 
-        if blimp_items:
+        if run_blimp:
             blimp_acc = eval_blimp(model, tokenizer, blimp_items, device)
             entry["blimp"] = round(blimp_acc, 4)
 
