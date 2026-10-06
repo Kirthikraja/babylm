@@ -290,6 +290,59 @@ def plot_training_curves(results_dir: Path, out_dir: Path) -> None:
     log.info("Saved: %s", out)
 
 
+# ── Figure 1b: Cross-condition loss vs words seen ────────────────────────────
+
+def plot_loss_vs_words(results_dir: Path, out_dir: Path) -> None:
+    """Overlay training loss for all three conditions on a shared words-seen axis."""
+    fig, ax = plt.subplots(figsize=(10, 5))
+    plotted = False
+
+    for cond in CONDITIONS_ALL:
+        data = load_training_curves(results_dir, cond)
+        if data is None:
+            continue
+
+        words = data.get("words_seen")
+        # Try multiple common key names for step-level loss
+        loss = (data.get("loss") or data.get("train_loss") or
+                data.get("step_loss") or data.get("step_train_loss"))
+
+        if not words or not loss or len(words) != len(loss):
+            log.warning("No step-level loss data for %s (tried loss/train_loss/step_loss)", cond)
+            continue
+
+        xs = np.array(words) / 1e6
+        ys = np.array(loss, dtype=float)
+
+        # Smooth with a rolling mean (window=5) for readability
+        if len(ys) > 10:
+            kernel = np.ones(5) / 5
+            ys_smooth = np.convolve(ys, kernel, mode="same")
+            ax.plot(xs, ys,        color=COLORS[cond], lw=0.5, alpha=0.25, zorder=2)
+            ax.plot(xs, ys_smooth, color=COLORS[cond], lw=LW,  alpha=0.90,
+                    label=LABELS[cond], zorder=3)
+        else:
+            ax.plot(xs, ys, color=COLORS[cond], lw=LW, marker="o",
+                    markersize=4, label=LABELS[cond], zorder=3)
+        plotted = True
+
+    if not plotted:
+        log.warning("No step-level loss vs words data — skipping loss_vs_words figure")
+        plt.close(fig)
+        return
+
+    ax.set_xlabel("Words Seen During Training (M)", fontsize=12)
+    ax.set_ylabel("Cross-Entropy Loss", fontsize=12)
+    ax.set_title("Training Loss vs Words Seen — All Conditions", fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc")
+
+    fig.tight_layout()
+    out = out_dir / "loss_vs_words.png"
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    log.info("Saved: %s", out)
+
+
 # ── Figure 2: BLiMP + EWoK summary (all 3 conditions) ────────────────────────
 
 def plot_eval_summary(results_dir: Path, out_dir: Path) -> None:
@@ -827,6 +880,149 @@ def plot_equalized_fbt_comparison(
     log.info("Saved: %s", out)
 
 
+# ── Figure 10: FBT Explicit vs Implicit over training ────────────────────────
+
+def plot_fbt_knowledge_cue_over_training(results_dir: Path, out_dir: Path) -> None:
+    """Per-condition: explicit-FB, implicit-FB, explicit-TB, implicit-TB over words seen."""
+    for cond in CONDITIONS_ALL:
+        data = load_checkpoint_evals(results_dir, cond)
+        if data is None:
+            continue
+        ckpts = [c for c in data.get("checkpoints", [])
+                 if c.get("words_seen") is not None
+                 and c.get("fbt_explicit_false_belief") is not None]
+        if not ckpts:
+            log.warning("No knowledge_cue breakdown in checkpoint_evals for %s — skipping", cond)
+            continue
+
+        ckpts = sorted(ckpts, key=lambda c: c["words_seen"])
+        xs = [c["words_seen"] / 1e6 for c in ckpts]
+
+        exp_fb = [c["fbt_explicit_false_belief"] for c in ckpts]
+        imp_fb = [c["fbt_implicit_false_belief"] for c in ckpts]
+        exp_tb = [c.get("fbt_explicit_true_belief") for c in ckpts]
+        imp_tb = [c.get("fbt_implicit_true_belief") for c in ckpts]
+
+        fig, ax = plt.subplots(figsize=(10, 5))
+
+        ax.plot(xs, exp_fb, color=C_FB,      lw=2.0, ls="-",  marker="o",
+                markersize=MARKER_SZ, zorder=4, label="Explicit — False Belief")
+        ax.plot(xs, imp_fb, color=C_FB,      lw=2.0, ls="--", marker="s",
+                markersize=MARKER_SZ, zorder=4, label="Implicit — False Belief",  alpha=0.85)
+
+        if all(v is not None for v in exp_tb):
+            ax.plot(xs, exp_tb, color=C_TB, lw=2.0, ls="-",  marker="o",
+                    markersize=MARKER_SZ, zorder=4, label="Explicit — True Belief")
+        if all(v is not None for v in imp_tb):
+            ax.plot(xs, imp_tb, color=C_TB, lw=2.0, ls="--", marker="s",
+                    markersize=MARKER_SZ, zorder=4, label="Implicit — True Belief", alpha=0.85)
+
+        ax.axhline(CHANCE, color="#aaaaaa", lw=1.2, ls="--", zorder=1)
+        ax.set_xlabel("Words Seen During Training (M)", fontsize=12)
+        ax.set_ylabel("P(Correct)", fontsize=12)
+        ax.set_ylim(0.15, 1.0)
+        ax.set_title(
+            f"FBT by Knowledge Cue During Training — {LABELS[cond]}",
+            fontsize=13, fontweight="bold",
+        )
+        ax.legend(fontsize=9, frameon=True, facecolor="white", edgecolor="#cccccc",
+                  loc="lower right")
+
+        fig.tight_layout()
+        out = out_dir / f"fbt_knowledge_cue_{cond}.png"
+        fig.savefig(out, bbox_inches="tight", facecolor="white")
+        plt.close(fig)
+        log.info("Saved: %s", out)
+
+
+# ── Figure 11: BLiMP over training ───────────────────────────────────────────
+
+def plot_blimp_over_training(results_dir: Path, out_dir: Path) -> None:
+    """All three conditions: BLiMP accuracy vs words seen on the same axis."""
+    fig, ax = plt.subplots(figsize=(10, 5))
+    plotted = False
+
+    for cond in CONDITIONS_ALL:
+        data = load_checkpoint_evals(results_dir, cond)
+        if data is None:
+            continue
+        ckpts = [c for c in data.get("checkpoints", [])
+                 if c.get("words_seen") is not None and c.get("blimp") is not None]
+        if not ckpts:
+            log.warning("No BLiMP data in checkpoint_evals for %s", cond)
+            continue
+        ckpts = sorted(ckpts, key=lambda c: c["words_seen"])
+        xs = [c["words_seen"] / 1e6 for c in ckpts]
+        ys = [c["blimp"] for c in ckpts]
+
+        ax.plot(xs, ys, color=COLORS[cond], lw=LW, marker=MARKERS.get(cond, "o"),
+                markersize=MARKER_SZ, label=LABELS[cond], zorder=3)
+        plotted = True
+
+    if not plotted:
+        log.warning("No BLiMP-over-training data — skipping figure")
+        plt.close(fig)
+        return
+
+    ax.axhline(CHANCE, color="#aaaaaa", lw=1.2, ls="--", zorder=1, label="Chance (0.50)")
+    ax.set_xlabel("Words Seen During Training (M)", fontsize=12)
+    ax.set_ylabel("BLiMP Accuracy", fontsize=12)
+    ax.set_ylim(0.45, 1.0)
+    ax.set_title("BLiMP Accuracy Over Training — All Conditions",
+                 fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc")
+
+    fig.tight_layout()
+    out = out_dir / "blimp_over_training.png"
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    log.info("Saved: %s", out)
+
+
+# ── Figure 12: EWoK over training ────────────────────────────────────────────
+
+def plot_ewok_over_training(results_dir: Path, out_dir: Path) -> None:
+    """All three conditions: EWoK accuracy vs words seen on the same axis."""
+    fig, ax = plt.subplots(figsize=(10, 5))
+    plotted = False
+
+    for cond in CONDITIONS_ALL:
+        data = load_checkpoint_evals(results_dir, cond)
+        if data is None:
+            continue
+        ckpts = [c for c in data.get("checkpoints", [])
+                 if c.get("words_seen") is not None and c.get("ewok") is not None]
+        if not ckpts:
+            log.warning("No EWoK data in checkpoint_evals for %s", cond)
+            continue
+        ckpts = sorted(ckpts, key=lambda c: c["words_seen"])
+        xs = [c["words_seen"] / 1e6 for c in ckpts]
+        ys = [c["ewok"] for c in ckpts]
+
+        ax.plot(xs, ys, color=COLORS[cond], lw=LW, marker=MARKERS.get(cond, "o"),
+                markersize=MARKER_SZ, label=LABELS[cond], zorder=3)
+        plotted = True
+
+    if not plotted:
+        log.warning("No EWoK-over-training data — skipping figure")
+        plt.close(fig)
+        return
+
+    ax.axhline(CHANCE, color="#aaaaaa", lw=1.2, ls="--", zorder=1, label="Chance (0.50)")
+    ax.set_xlabel("Words Seen During Training (M)", fontsize=12)
+    ax.set_ylabel("EWoK Accuracy", fontsize=12)
+    ax.set_ylim(0.40, 0.80)
+    ax.set_title("EWoK World-Knowledge Accuracy Over Training — All Conditions",
+                 fontsize=13, fontweight="bold")
+    ax.legend(fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc")
+
+    fig.tight_layout()
+    out = out_dir / "ewok_over_training.png"
+    fig.savefig(out, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    log.info("Saved: %s", out)
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
@@ -843,12 +1039,16 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     log.info("Output directory: %s", out_dir)
 
-    plot_training_curves(args.results_dir, out_dir)       # Fig 1: loss curves
-    plot_fbt_belief_condition(args.results_dir, out_dir)  # Fig 2: FB vs TB accuracy
-    plot_fbt_breakdown(args.results_dir, out_dir)         # Fig 3: 2x2 condition x cue
-    plot_eval_summary(args.results_dir, out_dir)          # Fig 4: BLiMP + EWoK summary
-    plot_checkpoint_accuracy(args.results_dir, out_dir)   # Fig 8: accuracy over training
-    plot_equalized_fbt_comparison(args.results_dir, out_dir)  # Fig 9: matched comparison
+    plot_training_curves(args.results_dir, out_dir)              # Fig 1:  epoch loss curves
+    plot_loss_vs_words(args.results_dir, out_dir)                # Fig 1b: loss vs words (cross-condition)
+    plot_fbt_belief_condition(args.results_dir, out_dir)         # Fig 2:  FB vs TB accuracy (final)
+    plot_fbt_breakdown(args.results_dir, out_dir)                # Fig 3:  2×2 condition × cue (final)
+    plot_eval_summary(args.results_dir, out_dir)                 # Fig 4:  BLiMP + EWoK summary bar
+    plot_checkpoint_accuracy(args.results_dir, out_dir)          # Fig 8:  FBT accuracy over training
+    plot_equalized_fbt_comparison(args.results_dir, out_dir)     # Fig 9:  matched x-axis comparison
+    plot_fbt_knowledge_cue_over_training(args.results_dir, out_dir)  # Fig 10: explicit/implicit over training
+    plot_blimp_over_training(args.results_dir, out_dir)          # Fig 11: BLiMP over training
+    plot_ewok_over_training(args.results_dir, out_dir)           # Fig 12: EWoK over training
 
     log.info("Done. Figures saved to %s", out_dir)
 
