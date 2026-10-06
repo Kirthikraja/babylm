@@ -13,7 +13,7 @@
 #SBATCH --gres=gpu:1
 
 CONDITION="${1:-chunked}"
-EXTRA_ARGS="${2:-}"   # e.g. --fbt_only
+EXTRA_ARGS="${@:2}"   # e.g. --fbt_only  or  --blimp_every_n 10
 
 echo "========================================"
 echo "Job started: $(date)"
