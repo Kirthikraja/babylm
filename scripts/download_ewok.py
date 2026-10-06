@@ -46,7 +46,7 @@ def main():
 
     log.info("Loading %s (split=%s) ...", args.dataset, args.split)
     try:
-        ds = load_dataset(args.dataset, split=args.split, trust_remote_code=True)
+        ds = load_dataset(args.dataset, split=args.split)
     except Exception as exc:
         log.error("Failed to load dataset: %s", exc)
         sys.exit(1)
@@ -54,34 +54,63 @@ def main():
     log.info("Dataset size: %d items", len(ds))
     log.info("Columns: %s", ds.column_names)
 
-    # Detect column name conventions (dataset versions differ)
-    true_key  = next((k for k in ("target_true",  "sentence_good", "correct_sentence")   if k in ds.column_names), None)
-    false_key = next((k for k in ("target_false", "sentence_bad",  "incorrect_sentence") if k in ds.column_names), None)
-    ctx_key   = next((k for k in ("context",) if k in ds.column_names), None)
-    dom_key   = next((k for k in ("domain", "type", "category") if k in ds.column_names), None)
+    cols = ds.column_names
 
-    if not true_key or not false_key:
-        log.error(
-            "Cannot find target columns. Available columns: %s\n"
-            "Expected one of: target_true/sentence_good  AND  target_false/sentence_bad",
-            ds.column_names,
-        )
-        sys.exit(1)
+    # EWoK-Core-1.0 uses a 2×2 design: two contexts × two targets.
+    # Each row expands into two evaluation items:
+    #   Item A — Context1 should predict Target1 over Target2
+    #   Item B — Context2 should predict Target2 over Target1
+    if "Context1" in cols and "Context2" in cols and "Target1" in cols and "Target2" in cols:
+        log.info("Detected EWoK-Core 2×2 format (Context1/2 × Target1/2)")
+        dom_key = next((k for k in ("Domain", "domain", "type", "category") if k in cols), None)
 
-    log.info("Using columns — context: %s, true: %s, false: %s, domain: %s",
-             ctx_key, true_key, false_key, dom_key)
+        by_domain: dict[str, list[dict]] = {}
+        for row in ds:
+            domain = str(row[dom_key]) if dom_key else "unknown"
+            # Item A: Context1 → Target1 preferred over Target2
+            by_domain.setdefault(domain, []).append({
+                "context":      row["Context1"],
+                "target_true":  row["Target1"],
+                "target_false": row["Target2"],
+                "domain":       domain,
+                "pair":         "A",
+            })
+            # Item B: Context2 → Target2 preferred over Target1
+            by_domain.setdefault(domain, []).append({
+                "context":      row["Context2"],
+                "target_true":  row["Target2"],
+                "target_false": row["Target1"],
+                "domain":       domain,
+                "pair":         "B",
+            })
 
-    # Group by domain and write one JSONL per domain
-    by_domain: dict[str, list[dict]] = {}
-    for row in ds:
-        domain = row.get(dom_key, "unknown") if dom_key else "unknown"
-        item = {
-            "context":      row.get(ctx_key, "") if ctx_key else "",
-            "target_true":  row[true_key],
-            "target_false": row[false_key],
-            "domain":       domain,
-        }
-        by_domain.setdefault(str(domain), []).append(item)
+    else:
+        # Generic format fallback
+        true_key  = next((k for k in ("target_true",  "sentence_good", "correct_sentence")   if k in cols), None)
+        false_key = next((k for k in ("target_false", "sentence_bad",  "incorrect_sentence") if k in cols), None)
+        ctx_key   = next((k for k in ("context", "Context") if k in cols), None)
+        dom_key   = next((k for k in ("domain", "Domain", "type", "category") if k in cols), None)
+
+        if not true_key or not false_key:
+            log.error(
+                "Cannot find target columns. Available: %s\n"
+                "Expected: target_true/sentence_good  AND  target_false/sentence_bad\n"
+                "     OR:  Context1 + Context2 + Target1 + Target2 (2×2 design)",
+                cols,
+            )
+            sys.exit(1)
+
+        log.info("Using columns — context: %s, true: %s, false: %s, domain: %s",
+                 ctx_key, true_key, false_key, dom_key)
+        by_domain = {}
+        for row in ds:
+            domain = str(row[dom_key]) if dom_key else "unknown"
+            by_domain.setdefault(domain, []).append({
+                "context":      row.get(ctx_key, "") if ctx_key else "",
+                "target_true":  row[true_key],
+                "target_false": row[false_key],
+                "domain":       domain,
+            })
 
     total = 0
     for domain, items in sorted(by_domain.items()):
