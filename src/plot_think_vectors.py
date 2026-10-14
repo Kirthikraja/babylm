@@ -37,22 +37,25 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 plt.rcParams.update({
-    "font.family":        "DejaVu Sans",
-    "font.size":          11,
-    "axes.facecolor":     "#f2f2f2",
-    "figure.facecolor":   "white",
-    "axes.grid":          True,
-    "grid.color":         "white",
-    "grid.linewidth":     1.2,
-    "grid.linestyle":     "-",
-    "axes.axisbelow":     True,
-    "axes.spines.top":    False,
-    "axes.spines.right":  False,
-    "axes.spines.left":   False,
-    "axes.spines.bottom": False,
-    "figure.dpi":         150,
-    "xtick.bottom":       False,
-    "ytick.left":         False,
+    "font.family":         "DejaVu Sans",
+    "font.size":           11,
+    "axes.facecolor":      "white",
+    "figure.facecolor":    "white",
+    "axes.grid":           True,
+    "grid.color":          "#e8e8e8",
+    "grid.linewidth":      0.8,
+    "grid.linestyle":      "-",
+    "axes.axisbelow":      True,
+    "axes.spines.top":     False,
+    "axes.spines.right":   False,
+    "axes.spines.left":    True,
+    "axes.spines.bottom":  True,
+    "axes.edgecolor":      "#cccccc",
+    "figure.dpi":          150,
+    "xtick.bottom":        True,
+    "ytick.left":          True,
+    "xtick.color":         "#555555",
+    "ytick.color":         "#555555",
 })
 
 CORAL = "#E8735A"
@@ -97,8 +100,13 @@ def plot_emergence(records: list[dict], focus_layer: int, out_dir: Path, conditi
 
     ax1.set_ylabel("Cosine Similarity to\nFinal Checkpoint", fontsize=12)
     ax1.set_ylim(-0.15, 1.10)
+    cond_label = {
+        "flat": "Sliding-Window (Flat)",
+        "chunked": "EOS-Chunked",
+        "balanced": "DENSITY-Balanced",
+    }.get(condition, condition.capitalize() if condition else "")
     ax1.set_title(
-        f"Think Vector Emergence During Training — Flat Model (Layer {focus_layer})",
+        f"Think Vector Emergence During Training — {cond_label} (Layer {focus_layer})",
         fontsize=13, fontweight="bold",
     )
     ax1.legend(fontsize=9, frameon=True, facecolor="white", edgecolor="#cccccc",
@@ -220,8 +228,13 @@ def plot_fbt_overlay(
     ax2.set_ylim(0.1, 1.0)
 
     ax1.set_xlabel("Words Seen During Training (M)", fontsize=12)
+    cond_label = {
+        "flat": "Sliding-Window (Flat)",
+        "chunked": "EOS-Chunked",
+        "balanced": "DENSITY-Balanced",
+    }.get(condition, condition.capitalize() if condition else "")
     ax1.set_title(
-        f"Think Vector Emergence vs FBT Behaviour (Flat Model, L{focus_layer})",
+        f"Think Vector Emergence vs FBT Behaviour — {cond_label} (L{focus_layer})",
         fontsize=12, fontweight="bold",
     )
 
@@ -231,9 +244,6 @@ def plot_fbt_overlay(
     ax1.legend(lines1 + lines2, labels1 + labels2,
                fontsize=9, frameon=True, facecolor="white", edgecolor="#cccccc",
                loc="lower right")
-
-    ax1.set_facecolor("#f2f2f2")
-    ax1.grid(True, color="white", linewidth=1.2)
 
     fig.tight_layout()
     out = out_dir / f"think_vector_fbt_overlay_{condition}.png"
