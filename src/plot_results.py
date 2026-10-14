@@ -586,15 +586,18 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     log.info("Output directory: %s", out_dir)
 
-    plot_loss_vs_words(args.results_dir, out_dir)                       # Fig 1
-    plot_training_curves(args.results_dir, out_dir)                     # Fig 2
-    plot_training_panel_combined(args.results_dir, out_dir)             # Fig 3 (per condition)
-    plot_fbt_knowledge_cue_over_training(args.results_dir, out_dir)     # Fig 4 (per condition)
-    plot_blimp_over_training(args.results_dir, out_dir)                 # Fig 5
-    plot_ewok_over_training(args.results_dir, out_dir)                  # Fig 6
-    plot_equalized_fbt_comparison(args.results_dir, out_dir)            # Fig 7
-    plot_fbt_summary_bars(args.results_dir, out_dir)                    # Fig 8
-    plot_blimp_ewok_summary(args.results_dir, out_dir)                  # Fig 9
+    # ── Core thesis figures (7 total) ──────────────────────────────────────────
+    plot_training_curves(args.results_dir, out_dir)          # Fig 1: epoch loss
+    plot_loss_vs_words(args.results_dir, out_dir)            # Fig 2: step loss vs words
+    plot_training_panel_combined(args.results_dir, out_dir)  # Fig 3/4: BLiMP+FBT per condition (flat & chunked)
+    plot_blimp_over_training(args.results_dir, out_dir)      # Fig 5: BLiMP cross-condition
+    plot_ewok_over_training(args.results_dir, out_dir)        # Fig 6: EWoK cross-condition
+    plot_equalized_fbt_comparison(args.results_dir, out_dir) # Fig 7: fair FBT comparison + gap
+
+    # ── Available for appendix / exploration (not called by default) ───────────
+    # plot_fbt_knowledge_cue_over_training(args.results_dir, out_dir)
+    # plot_fbt_summary_bars(args.results_dir, out_dir)
+    # plot_blimp_ewok_summary(args.results_dir, out_dir)
 
     log.info("All done. Figures saved to %s", out_dir)
 
