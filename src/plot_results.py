@@ -365,8 +365,20 @@ def plot_blimp_over_training(results_dir: Path, out_dir: Path) -> None:
 # ── Figure 6: EWoK over training — all conditions ─────────────────────────────
 
 def plot_ewok_over_training(results_dir: Path, out_dir: Path) -> None:
-    fig, ax = plt.subplots(figsize=(9, 4.5))
+    # Different dash styles so overlapping lines at ~0.50 stay distinguishable
+    DASH_STYLES = {
+        "flat":     (None, None),       # solid
+        "chunked":  (6, 3),             # dashed
+        "balanced": (2, 2),             # dotted
+    }
+    # Tiny vertical offsets so identical values don't fully overlap
+    OFFSETS = {"flat": 0.000, "chunked": 0.003, "balanced": -0.003}
+    # Marker shapes per condition
+    MARKERS  = {"flat": "o", "chunked": "s", "balanced": "^"}
+
+    fig, ax = plt.subplots(figsize=(10, 5))
     plotted = False
+    last_pts: dict[str, tuple[float, float]] = {}
 
     for cond in CONDITIONS_ALL:
         ckpts = load_checkpoint_evals(results_dir, cond)
@@ -379,20 +391,48 @@ def plot_ewok_over_training(results_dir: Path, out_dir: Path) -> None:
 
         xs = np.array([c["words_seen"] / 1e6 for c in ewok_ckpts])
         ys = np.array([c["ewok"]             for c in ewok_ckpts], dtype=float)
-        _plot_line(ax, xs, ys, COLORS[cond], LABELS[cond])
+        ys = ys + OFFSETS.get(cond, 0.0)
+
+        dash, gap = DASH_STYLES.get(cond, (None, None))
+        lw   = 2.0
+        col  = COLORS[cond]
+        lbl  = LABELS[cond]
+        mkr  = MARKERS.get(cond, "o")
+
+        if dash is not None:
+            ax.plot(xs, ys, color=col, lw=lw, dashes=(dash, gap),
+                    marker=mkr, markersize=3.5, markevery=5,
+                    alpha=0.85, label=lbl, zorder=3)
+        else:
+            ax.plot(xs, ys, color=col, lw=lw, linestyle="-",
+                    marker=mkr, markersize=3.5, markevery=5,
+                    alpha=0.85, label=lbl, zorder=3)
+
+        last_pts[cond] = (float(xs[-1]), float(ys[-1]))
         plotted = True
 
     if not plotted:
         plt.close(fig)
         return
 
+    # Direct end-of-line labels so conditions are clear without hunting the legend
+    label_map = {"flat": "Flat", "chunked": "Chunked", "balanced": "Balanced"}
+    for cond, (lx, ly) in last_pts.items():
+        ax.text(lx + 0.4, ly, label_map[cond], color=COLORS[cond],
+                fontsize=9, fontweight="bold", va="center")
+
     _chance_line(ax)
     ax.set_xlabel("Words Seen During Training (M)", fontsize=12)
     ax.set_ylabel("EWoK Accuracy", fontsize=12)
-    ax.set_ylim(0.40, 0.65)
-    ax.set_title("EWoK World-Knowledge Accuracy Over Training — All Conditions",
+    ax.set_ylim(0.45, 0.56)   # tighter range: all values are ~0.50, show the tiny variance
+    ax.set_title("EWoK World-Knowledge Accuracy Over Training — All Conditions\n"
+                 "(all lines near chance — null result)",
                  fontsize=13, fontweight="bold", pad=12)
     ax.legend(fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc")
+    # Annotate the null result clearly
+    ax.text(0.98, 0.08, "All conditions at chance throughout training",
+            transform=ax.transAxes, ha="right", va="bottom",
+            fontsize=10, color="#888888", style="italic")
     fig.tight_layout()
     _save(fig, out_dir / "ewok_over_training.png")
 
@@ -401,12 +441,13 @@ def plot_ewok_over_training(results_dir: Path, out_dir: Path) -> None:
 
 def plot_equalized_fbt_comparison(results_dir: Path, out_dir: Path) -> None:
     """
-    All three conditions on the same x-axis, capped at the lowest training ceiling.
+    Flat vs Chunked on the same x-axis, capped at chunked's training ceiling.
+    Balanced is excluded — its 3M ceiling is noise territory for a 48-item test.
     Top panel: FBT Overall + True Belief + False Belief.
-    Bottom panel: FB − TB gap (how much the model is biased toward False Belief).
+    Bottom panel: FB − TB gap (false belief bias).
     """
     all_data: dict[str, list[dict]] = {}
-    for cond in CONDITIONS_ALL:
+    for cond in CONDITIONS:   # flat + chunked only, not balanced
         ckpts = load_checkpoint_evals(results_dir, cond)
         if ckpts:
             all_data[cond] = ckpts
@@ -415,6 +456,7 @@ def plot_equalized_fbt_comparison(results_dir: Path, out_dir: Path) -> None:
         log.warning("No checkpoint_evals found — skipping equalized comparison")
         return
 
+    # Cap at the shorter condition (chunked) so x-axes match
     cap = min(max(c["words_seen"] for c in ckpts) for ckpts in all_data.values())
     log.info("Equalized cap: %.1fM words", cap / 1e6)
 
