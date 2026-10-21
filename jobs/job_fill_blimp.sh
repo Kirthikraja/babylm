@@ -10,7 +10,7 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=24G
 #SBATCH --time=7-00:00:00
-#SBATCH --partition=gpu-mig-40g
+#SBATCH --partition=gpu-2080ti-11g
 #SBATCH --gres=gpu:1
 
 CONDITION="${1:-flat}"
