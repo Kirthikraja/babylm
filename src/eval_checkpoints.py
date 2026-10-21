@@ -204,6 +204,9 @@ def parse_args():
     p.add_argument("--blimp_every_n", type=int, default=1,
                    help="Run BLiMP only at every N-th checkpoint (default: 1 = every checkpoint). "
                         "Use 10 for flat to stay within 4h SLURM limit.")
+    p.add_argument("--fill_blimp", action="store_true",
+                   help="Re-visit existing checkpoints that are missing blimp_overall and add BLiMP "
+                        "scores. Skips checkpoints that already have BLiMP. Use after --fbt_only runs.")
     return p.parse_args()
 
 
@@ -281,13 +284,23 @@ def main():
     # Resume from existing results if present
     done_steps: set[int] = set()
     checkpoint_results: list[dict] = []
+    # step -> index in checkpoint_results (for --fill_blimp in-place update)
+    step_to_idx: dict[int, int] = {}
     if out_path.exists():
         try:
             prev = json.loads(out_path.read_text(encoding="utf-8"))
             checkpoint_results = prev.get("checkpoints", [])
-            done_steps = {e["step"] for e in checkpoint_results}
-            log.info("Resuming: %d checkpoints already done, %d remaining",
-                     len(done_steps), len(checkpoints) - len(done_steps))
+            step_to_idx = {e["step"]: i for i, e in enumerate(checkpoint_results)}
+            if args.fill_blimp:
+                # Only skip steps that already have BLiMP data
+                done_steps = {e["step"] for e in checkpoint_results if e.get("blimp") is not None}
+                missing = [e["step"] for e in checkpoint_results if e.get("blimp") is None]
+                log.info("fill_blimp mode: %d have BLiMP, %d missing BLiMP",
+                         len(done_steps), len(missing))
+            else:
+                done_steps = {e["step"] for e in checkpoint_results}
+                log.info("Resuming: %d checkpoints already done, %d remaining",
+                         len(done_steps), len(checkpoints) - len(done_steps))
         except Exception as exc:
             log.warning("Could not load existing results (%s) — starting fresh", exc)
 
@@ -300,6 +313,9 @@ def main():
             continue
 
         run_blimp = blimp_items and (ckpt_idx % args.blimp_every_n == 0)
+        # In fill_blimp mode, always run BLiMP (that's the whole point)
+        if args.fill_blimp:
+            run_blimp = bool(blimp_items)
 
         log.info("── checkpoint-%d  (%.1fM words) ──",
                  step, (words_seen or 0) / 1_000_000)
@@ -336,7 +352,14 @@ def main():
                  fbt.get("implicit_false_belief") or 0.0,
                  blimp_str, ewok_str)
 
-        checkpoint_results.append(entry)
+        if args.fill_blimp and step in step_to_idx:
+            # Merge BLiMP result into the existing entry (keep FBT/EWoK already there)
+            checkpoint_results[step_to_idx[step]].update(
+                {k: v for k, v in entry.items() if k in ("blimp",)}
+            )
+        else:
+            checkpoint_results.append(entry)
+            step_to_idx[step] = len(checkpoint_results) - 1
 
         # Save incrementally so a job timeout doesn't lose completed work
         sorted_results = sorted(checkpoint_results, key=lambda e: e["step"])
