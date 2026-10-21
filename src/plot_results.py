@@ -430,9 +430,9 @@ def plot_ewok_over_training(results_dir: Path, out_dir: Path) -> None:
                  fontsize=13, fontweight="bold", pad=12)
     ax.legend(fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc")
     # Annotate the null result clearly
-    ax.text(0.98, 0.08, "All conditions at chance throughout training",
-            transform=ax.transAxes, ha="right", va="bottom",
-            fontsize=10, color="#888888", style="italic")
+    # ax.text(0.98, 0.08, "All conditions at chance throughout training",
+    #         transform=ax.transAxes, ha="right", va="bottom",
+    #         fontsize=10, color="#888888", style="italic")
     fig.tight_layout()
     _save(fig, out_dir / "ewok_over_training.png")
 
