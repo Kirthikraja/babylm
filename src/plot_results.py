@@ -94,17 +94,12 @@ def _smooth(xs: np.ndarray, ys: np.ndarray, window: int = SMOOTH_W):
     return xs[half:-half], ys_s[half:-half]
 
 
-def _plot_line(ax, xs, ys, color, label, lw=LW, smooth=True, marker=None):
-    """Raw faded thin line + smoothed bold line on top (reference style)."""
+def _plot_line(ax, xs, ys, color, label, lw=LW, smooth=False, marker=None):
+    """Raw line only — no smoothing."""
     xs = np.asarray(xs, dtype=float)
     ys = np.asarray(ys, dtype=float)
-    ax.plot(xs, ys, color=color, lw=LW_RAW, alpha=ALPHA_RAW, zorder=2)
-    if smooth and len(xs) >= SMOOTH_W:
-        xs_s, ys_s = _smooth(xs, ys)
-        ax.plot(xs_s, ys_s, color=color, lw=lw, zorder=4, label=label)
-    else:
-        kw = dict(marker=marker, markersize=6) if marker else {}
-        ax.plot(xs, ys, color=color, lw=lw, zorder=4, label=label, **kw)
+    kw = dict(marker=marker, markersize=6) if marker else {}
+    ax.plot(xs, ys, color=color, lw=lw, zorder=4, label=label, **kw)
 
 
 def _chance_line(ax):
