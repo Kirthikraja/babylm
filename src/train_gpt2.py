@@ -205,7 +205,7 @@ def train(args: argparse.Namespace) -> None:
     log.info("Data hash: %s", data_hash)
 
     # ── Dataset split (fixed seed so resume sees same split) ──────────────────
-    full_dataset = ChunkDataset(jsonl_files)
+    full_dataset = ChunkDataset(jsonl_files, max_len=args.max_len)
     n_eval  = max(1, int(len(full_dataset) * EVAL_SPLIT))
     n_train = len(full_dataset) - n_eval
     train_dataset, eval_dataset = random_split(
@@ -223,11 +223,12 @@ def train(args: argparse.Namespace) -> None:
     log.info("Device: %s", device)
 
     # ── Step / checkpoint math (needed before resume load) ────────────────────
-    tokens_per_step    = args.batch_size * args.grad_accum * 1024
+    tokens_per_step    = args.batch_size * args.grad_accum * args.max_len
     words_per_step     = tokens_per_step * 0.75
     steps_per_epoch    = math.ceil(n_train / (args.batch_size * args.grad_accum))
     total_steps        = steps_per_epoch * args.epochs
-    warmup_steps       = max(1, int(total_steps * WARMUP_RATIO))
+    warmup_steps       = args.warmup_steps if args.warmup_steps is not None \
+                         else max(1, int(total_steps * WARMUP_RATIO))
     steps_per_ckpt     = max(1, int(WORDS_PER_CHECKPOINT / words_per_step))
     log.info("Total steps: %d  |  Steps/epoch: %d  |  Checkpoint every: %d steps",
              total_steps, steps_per_epoch, steps_per_ckpt)
@@ -419,6 +420,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--batch_size",   type=int,  default=BATCH_SIZE)
     p.add_argument("--grad_accum",   type=int,  default=GRAD_ACCUM)
     p.add_argument("--lr",           type=float, default=LR)
+    p.add_argument("--max_len",      type=int,   default=1024,
+                   help="Max sequence length fed to the model (paper baseline: 512)")
+    p.add_argument("--warmup_steps", type=int,   default=None,
+                   help="Absolute warmup steps; if omitted uses WARMUP_RATIO × total_steps")
     return p.parse_args()
 
 
