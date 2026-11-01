@@ -193,6 +193,10 @@ def load_ewok_local(cache_path: Path) -> list[dict]:
 def parse_args():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--condition",  choices=["chunked", "flat", "balanced"], required=True)
+    p.add_argument("--model_dir",  type=Path, default=None,
+                   help="Override model checkpoint directory (default: models/<condition>)")
+    p.add_argument("--results_dir", type=Path, default=None,
+                   help="Override results output directory (default: results/<condition>)")
     p.add_argument("--fbt_only",   action="store_true",
                    help="Skip BLiMP and EWoK evaluation (faster)")
     p.add_argument("--data_path",  type=Path, default=None,
@@ -213,8 +217,8 @@ def parse_args():
 def main():
     args = parse_args()
     base        = Path(__file__).parent.parent
-    models_dir  = base / "models"  / args.condition
-    results_dir = base / "results" / args.condition
+    models_dir  = args.model_dir   or base / "models"  / args.condition
+    results_dir = args.results_dir or base / "results" / args.condition
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Load words_seen mapping from training curves

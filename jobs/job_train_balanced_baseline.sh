@@ -41,6 +41,7 @@ python -u src/train_gpt2.py \
     --lr 5e-5 \
     --max_len 512 \
     --warmup_steps 213 \
-    --output_dir models/balanced_baseline
+    --output_dir models/balanced_baseline \
+    --results_dir results/balanced_baseline
 
 echo "Job finished: $(date)"

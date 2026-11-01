@@ -192,7 +192,7 @@ def train(args: argparse.Namespace) -> None:
     base        = Path(__file__).parent.parent
     data_dir    = args.data_dir or base / "data" / f"{args.condition}_{args.corpus_scale}"
     out_dir     = args.output_dir or base / "models" / args.condition
-    results_dir = base / "results" / args.condition
+    results_dir = args.results_dir or base / "results" / args.condition
     out_dir.mkdir(parents=True, exist_ok=True)
     results_dir.mkdir(parents=True, exist_ok=True)
 
@@ -416,6 +416,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--corpus_scale", choices=["10M", "100M"], default="10M")
     p.add_argument("--data_dir",     type=Path, default=None)
     p.add_argument("--output_dir",   type=Path, default=None)
+    p.add_argument("--results_dir",  type=Path, default=None,
+                   help="Where to write training_curves.json (default: results/<condition>)")
     p.add_argument("--epochs",       type=int,  default=1)
     p.add_argument("--batch_size",   type=int,  default=BATCH_SIZE)
     p.add_argument("--grad_accum",   type=int,  default=GRAD_ACCUM)
