@@ -51,16 +51,20 @@ def location_log_prob(
     context: str,
     location: str,
     device: torch.device,
-) -> float:
+) -> float | None:
     """Mean token log-probability of *location* given *context*.
 
     Normalising by token count makes scores comparable across locations
     that tokenise into different numbers of subword pieces.
+    Returns None when tokenisation produces an empty sequence.
     """
     ctx_ids  = tokenizer.encode(context, add_special_tokens=False)
     # GPT-2 tokeniser encodes a space-prefixed word differently from the bare word.
     # The context already ends with "the " so we encode the bare location word.
     loc_ids  = tokenizer.encode(" " + location.strip(), add_special_tokens=False)
+
+    if not ctx_ids or not loc_ids:
+        return None
 
     input_ids = torch.tensor([ctx_ids + loc_ids]).to(device)
     with torch.no_grad():
@@ -95,6 +99,11 @@ def evaluate(
 
         lp_start = location_log_prob(model, tokenizer, context, start_loc, device)
         lp_end   = location_log_prob(model, tokenizer, context, end_loc,   device)
+
+        if lp_start is None or lp_end is None:
+            log.warning("Skipping item with empty tokenisation: passage=%r start=%r end=%r",
+                        passage[:60], start_loc, end_loc)
+            continue
 
         # Correct answer depends on condition
         if "false" in condition.lower():
