@@ -190,9 +190,21 @@ def load_ewok_local(cache_path: Path) -> list[dict]:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+ALL_CONDITIONS = [
+    "chunked", "flat", "balanced",
+    "full_baseline", "no_fiction", "no_childes", "no_dialogue", "no_wikipedia",
+]
+ABLATION_CONDITIONS = [
+    "full_baseline", "no_fiction", "no_childes", "no_dialogue", "no_wikipedia",
+]
+
+
 def parse_args():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--condition",  choices=["chunked", "flat", "balanced"], required=True)
+    p.add_argument("--condition",  choices=ALL_CONDITIONS,
+                   help="Condition to evaluate (omit with --all_conditions)")
+    p.add_argument("--all_conditions", action="store_true",
+                   help="Evaluate all 5 ablation conditions sequentially")
     p.add_argument("--model_dir",  type=Path, default=None,
                    help="Override model checkpoint directory (default: models/<condition>)")
     p.add_argument("--results_dir", type=Path, default=None,
@@ -214,11 +226,11 @@ def parse_args():
     return p.parse_args()
 
 
-def main():
-    args = parse_args()
+def run_condition(args, condition: str) -> None:
+    """Evaluate all checkpoints for one condition."""
     base        = Path(__file__).parent.parent
-    models_dir  = args.model_dir   or base / "models"  / args.condition
-    results_dir = args.results_dir or base / "results" / args.condition
+    models_dir  = args.model_dir   or base / "models"  / condition
+    results_dir = args.results_dir or base / "results" / condition
     results_dir.mkdir(parents=True, exist_ok=True)
 
     # Load words_seen mapping from training curves
@@ -241,8 +253,8 @@ def main():
     )
     if not checkpoints:
         log.error("No checkpoint-* directories found in %s", models_dir)
-        sys.exit(1)
-    log.info("Found %d checkpoints for condition=%s", len(checkpoints), args.condition)
+        return
+    log.info("Found %d checkpoints for condition=%s", len(checkpoints), condition)
 
     # Load FBT data
     data_path = args.data_path or base / "data" / "fbt" / "fb.csv"
@@ -368,7 +380,7 @@ def main():
         # Save incrementally so a job timeout doesn't lose completed work
         sorted_results = sorted(checkpoint_results, key=lambda e: e["step"])
         out_path.write_text(
-            json.dumps({"condition": args.condition, "checkpoints": sorted_results}, indent=2),
+            json.dumps({"condition": condition, "checkpoints": sorted_results}, indent=2),
             encoding="utf-8",
         )
 
@@ -376,6 +388,23 @@ def main():
         torch.cuda.empty_cache()
 
     log.info("Done. %d total entries in %s", len(checkpoint_results), out_path)
+
+
+def main():
+    args = parse_args()
+    if args.all_conditions:
+        conditions = ABLATION_CONDITIONS
+    elif args.condition:
+        conditions = [args.condition]
+    else:
+        log.error("Provide --condition or --all_conditions")
+        sys.exit(1)
+
+    for cond in conditions:
+        log.info("=" * 60)
+        log.info("Evaluating condition: %s", cond)
+        log.info("=" * 60)
+        run_condition(args, cond)
 
 
 if __name__ == "__main__":

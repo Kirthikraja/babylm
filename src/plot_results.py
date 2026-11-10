@@ -607,6 +607,192 @@ def plot_blimp_ewok_summary(results_dir: Path, out_dir: Path) -> None:
     _save(fig, out_dir / "blimp_ewok_summary.png")
 
 
+# ── Figure 10+: Ablation emergence comparison ─────────────────────────────────
+
+ABLATION_CONDITIONS = [
+    "full_baseline", "no_fiction", "no_childes", "no_dialogue", "no_wikipedia",
+]
+ABLATION_LABELS = {
+    "full_baseline": "Full Baseline",
+    "no_fiction":    "No Fiction (−Gutenberg)",
+    "no_childes":    "No CHILDES (−CDS)",
+    "no_dialogue":   "No Dialogue (−OpenSubs/BNC)",
+    "no_wikipedia":  "No Wikipedia",
+}
+# Colorblind-safe palette for 5 conditions
+ABLATION_COLORS = {
+    "full_baseline": "#3C5488",   # navy
+    "no_fiction":    "#E64B35",   # coral-red
+    "no_childes":    "#F39B7F",   # peach
+    "no_dialogue":   "#00A087",   # teal
+    "no_wikipedia":  "#7E6EAB",   # purple
+}
+
+
+def plot_ablation_emergence_comparison(results_dir: Path, out_dir: Path) -> None:
+    """
+    Multi-panel ablation comparison figure showing, as a function of words seen:
+      Panel A: FBT False Belief accuracy (the key thesis metric)
+      Panel B: FBT True Belief accuracy  (control — should mirror FB)
+      Panel C: BLiMP accuracy (syntactic competence)
+      Panel D: EWoK accuracy  (world knowledge, expected at chance)
+
+    One line per ablation condition; full_baseline in bold.
+    Saves to figures/ablation_emergence_comparison.png
+    """
+    # ── Load data ────────────────────────────────────────────────────────────
+    data: dict[str, list[dict]] = {}
+    for cond in ABLATION_CONDITIONS:
+        ckpts = load_checkpoint_evals(results_dir, cond)
+        if ckpts:
+            data[cond] = ckpts
+        else:
+            log.warning("No checkpoint_evals.json for ablation condition: %s", cond)
+
+    if not data:
+        log.warning("No ablation data found — skipping ablation comparison figure")
+        return
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 9), sharey=False)
+    panels = [
+        (axes[0, 0], "fbt_false_belief",  "FBT False Belief Accuracy", (0.3, 1.0)),
+        (axes[0, 1], "fbt_true_belief",   "FBT True Belief Accuracy",  (0.0, 1.0)),
+        (axes[1, 0], "blimp",             "BLiMP Accuracy",             (0.4, 0.8)),
+        (axes[1, 1], "ewok",              "EWoK Accuracy",              (0.3, 0.7)),
+    ]
+
+    for ax, metric, title, ylim in panels:
+        plotted = False
+        for cond in ABLATION_CONDITIONS:
+            if cond not in data:
+                continue
+            ckpts = data[cond]
+            xs = np.array([c["words_seen"] for c in ckpts], dtype=float) / 1e6
+            ys = np.array([c.get(metric) or np.nan for c in ckpts], dtype=float)
+
+            # Only plot points where data is not nan
+            valid = ~np.isnan(ys)
+            if not valid.any():
+                continue
+
+            lw    = 2.5 if cond == "full_baseline" else 1.8
+            alpha = 1.0 if cond == "full_baseline" else 0.85
+            ls    = "-" if cond == "full_baseline" else "--"
+
+            ax.plot(xs[valid], ys[valid],
+                    color=ABLATION_COLORS[cond], lw=lw, alpha=alpha, ls=ls,
+                    label=ABLATION_LABELS[cond], zorder=4 if cond == "full_baseline" else 3)
+            plotted = True
+
+        ax.axhline(CHANCE, color=CHANCE_COL, lw=1.0, ls=":", zorder=1)
+        ax.set_xlabel("Words Seen During Training (M)", fontsize=11)
+        ax.set_ylabel("Accuracy", fontsize=11)
+        ax.set_ylim(*ylim)
+        ax.set_title(title, fontsize=12, fontweight="bold", pad=8)
+
+    # Shared legend below all panels
+    handles, labels = axes[0, 0].get_legend_handles_labels()
+    # Add chance line to legend manually
+    handles.append(plt.Line2D([0], [0], color=CHANCE_COL, lw=1.0, ls=":", label="Chance (0.50)"))
+    labels.append("Chance (0.50)")
+    fig.legend(handles, labels, loc="lower center", ncol=3,
+               fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc",
+               bbox_to_anchor=(0.5, -0.04))
+
+    fig.suptitle("Ablation Study: Sub-Corpus Contribution to Cognitive Emergence",
+                 fontsize=14, fontweight="bold", y=1.01)
+    fig.tight_layout(rect=[0, 0.06, 1, 1])
+    _save(fig, out_dir / "ablation_emergence_comparison.png")
+
+
+def plot_ablation_fbt_trajectories(results_dir: Path, out_dir: Path) -> None:
+    """
+    Single-panel focus on the False Belief gap (FB − TB) across ablation conditions.
+    A positive gap indicates the model is using mental-state reasoning rather than recency.
+    """
+    data: dict[str, list[dict]] = {}
+    for cond in ABLATION_CONDITIONS:
+        ckpts = load_checkpoint_evals(results_dir, cond)
+        if ckpts:
+            data[cond] = ckpts
+
+    if not data:
+        return
+
+    fig, ax = plt.subplots(figsize=(9, 5))
+
+    for cond in ABLATION_CONDITIONS:
+        if cond not in data:
+            continue
+        ckpts = data[cond]
+        xs  = np.array([c["words_seen"] for c in ckpts], dtype=float) / 1e6
+        fb  = np.array([c.get("fbt_false_belief") or np.nan for c in ckpts], dtype=float)
+        tb  = np.array([c.get("fbt_true_belief")  or np.nan for c in ckpts], dtype=float)
+        gap = fb - tb    # positive = genuine mental-state reasoning
+
+        valid = ~(np.isnan(fb) | np.isnan(tb))
+        if not valid.any():
+            continue
+
+        lw = 2.5 if cond == "full_baseline" else 1.8
+        ls = "-" if cond == "full_baseline" else "--"
+        ax.plot(xs[valid], gap[valid],
+                color=ABLATION_COLORS[cond], lw=lw, ls=ls,
+                label=ABLATION_LABELS[cond])
+
+    ax.axhline(0, color=CHANCE_COL, lw=1.2, ls="--", label="No gap (0.00)")
+    ax.set_xlabel("Words Seen During Training (M)", fontsize=12)
+    ax.set_ylabel("FB Accuracy − TB Accuracy", fontsize=12)
+    ax.set_title("FBT False Belief Gap Across Ablation Conditions",
+                 fontsize=13, fontweight="bold", pad=12)
+    ax.legend(fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc")
+    fig.tight_layout()
+    _save(fig, out_dir / "ablation_fbt_gap.png")
+
+
+def plot_ablation_blimp_comparison(results_dir: Path, out_dir: Path) -> None:
+    """
+    Final-checkpoint BLiMP bar chart comparing all ablation conditions.
+    Shows which sub-corpus is most important for syntactic competence.
+    """
+    final_blimp: dict[str, float] = {}
+    for cond in ABLATION_CONDITIONS:
+        ckpts = load_checkpoint_evals(results_dir, cond)
+        if not ckpts:
+            continue
+        blimp_ckpts = [c for c in ckpts if "blimp" in c]
+        if blimp_ckpts:
+            final_blimp[cond] = blimp_ckpts[-1]["blimp"]
+
+    if not final_blimp:
+        return
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    conds = [c for c in ABLATION_CONDITIONS if c in final_blimp]
+    vals  = [final_blimp[c] for c in conds]
+    xpos  = np.arange(len(conds))
+    colors = [ABLATION_COLORS[c] for c in conds]
+    bars  = ax.bar(xpos, vals, color=colors, edgecolor="white", linewidth=0.8, alpha=0.88)
+
+    # Annotate bars
+    for bar, v in zip(bars, vals):
+        ax.text(bar.get_x() + bar.get_width() / 2,
+                bar.get_height() + 0.004,
+                f"{v:.3f}", ha="center", va="bottom",
+                fontsize=10, fontweight="bold", color="#333333")
+
+    ax.axhline(CHANCE, color=CHANCE_COL, lw=1.2, ls="--", label="Chance (0.50)")
+    ax.set_xticks(xpos)
+    ax.set_xticklabels([ABLATION_LABELS[c] for c in conds], rotation=18, ha="right", fontsize=10)
+    ax.set_ylabel("BLiMP Accuracy", fontsize=12)
+    ax.set_ylim(0.40, 0.90)
+    ax.set_title("BLiMP at Final Checkpoint — Sub-Corpus Ablation",
+                 fontsize=13, fontweight="bold", pad=12)
+    ax.legend(fontsize=10, frameon=True, facecolor="white", edgecolor="#cccccc")
+    fig.tight_layout()
+    _save(fig, out_dir / "ablation_blimp_bars.png")
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
 
 def parse_args() -> argparse.Namespace:
@@ -614,6 +800,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--results_dir", type=Path,
                    default=Path(__file__).parent.parent / "results")
     p.add_argument("--out_dir", type=Path, default=None)
+    p.add_argument("--ablation", action="store_true",
+                   help="Generate ablation comparison figures instead of pilot figures")
     return p.parse_args()
 
 
@@ -623,18 +811,24 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     log.info("Output directory: %s", out_dir)
 
-    # ── Core thesis figures (7 total) ──────────────────────────────────────────
-    plot_training_curves(args.results_dir, out_dir)          # Fig 1: epoch loss
-    plot_loss_vs_words(args.results_dir, out_dir)            # Fig 2: step loss vs words
-    plot_training_panel_combined(args.results_dir, out_dir)  # Fig 3/4: BLiMP+FBT per condition (flat & chunked)
-    plot_blimp_over_training(args.results_dir, out_dir)      # Fig 5: BLiMP cross-condition
-    plot_ewok_over_training(args.results_dir, out_dir)        # Fig 6: EWoK cross-condition
-    plot_equalized_fbt_comparison(args.results_dir, out_dir) # Fig 7: fair FBT comparison + gap
+    if args.ablation:
+        # ── 100M ablation figures ──────────────────────────────────────────────
+        plot_ablation_emergence_comparison(args.results_dir, out_dir)  # Fig A1: 4-panel
+        plot_ablation_fbt_trajectories(args.results_dir, out_dir)      # Fig A2: FB−TB gap
+        plot_ablation_blimp_comparison(args.results_dir, out_dir)      # Fig A3: BLiMP bars
+    else:
+        # ── Core thesis figures (pilot experiment) ────────────────────────────
+        plot_training_curves(args.results_dir, out_dir)          # Fig 1: epoch loss
+        plot_loss_vs_words(args.results_dir, out_dir)            # Fig 2: step loss vs words
+        plot_training_panel_combined(args.results_dir, out_dir)  # Fig 3/4: BLiMP+FBT per condition
+        plot_blimp_over_training(args.results_dir, out_dir)      # Fig 5: BLiMP cross-condition
+        plot_ewok_over_training(args.results_dir, out_dir)       # Fig 6: EWoK cross-condition
+        plot_equalized_fbt_comparison(args.results_dir, out_dir) # Fig 7: fair FBT comparison + gap
 
-    # ── Available for appendix / exploration (not called by default) ───────────
-    # plot_fbt_knowledge_cue_over_training(args.results_dir, out_dir)
-    # plot_fbt_summary_bars(args.results_dir, out_dir)
-    # plot_blimp_ewok_summary(args.results_dir, out_dir)
+        # ── Available for appendix / exploration ──────────────────────────────
+        # plot_fbt_knowledge_cue_over_training(args.results_dir, out_dir)
+        # plot_fbt_summary_bars(args.results_dir, out_dir)
+        # plot_blimp_ewok_summary(args.results_dir, out_dir)
 
     log.info("All done. Figures saved to %s", out_dir)
 

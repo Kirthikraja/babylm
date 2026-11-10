@@ -66,6 +66,18 @@ WARMUP_RATIO = 0.01
 EVAL_SPLIT = 0.1
 WORDS_PER_CHECKPOINT = 1_000_000
 
+# ── Dense-early checkpoint schedule ─────────────────────────────────────────────
+# For 100M ablation: every 1M words for 0–10M, then every 10M words after.
+DENSE_CKPT_UNTIL_WORDS  = 10_000_000   # dense phase upper bound
+DENSE_CKPT_INTERVAL     =  1_000_000   # interval during dense phase
+SPARSE_CKPT_INTERVAL    = 10_000_000   # interval during sparse phase
+
+# Ablation condition names (100M experiment)
+ABLATION_CONDITIONS = [
+    "full_baseline", "no_fiction", "no_childes", "no_dialogue", "no_wikipedia",
+]
+ALL_CONDITIONS = ["chunked", "flat", "balanced"] + ABLATION_CONDITIONS
+
 # ── Early stopping ──────────────────────────────────────────────────────────────
 EARLY_STOP_PATIENCE  = 3
 EARLY_STOP_MIN_DELTA = 1e-4
@@ -190,7 +202,12 @@ def save_checkpoint(
 
 def train(args: argparse.Namespace) -> None:
     base        = Path(__file__).parent.parent
-    data_dir    = args.data_dir or base / "data" / f"{args.condition}_{args.corpus_scale}"
+    if args.data_dir:
+        data_dir = args.data_dir
+    elif args.condition in ABLATION_CONDITIONS:
+        data_dir = base / "data" / "ablation_100M" / args.condition
+    else:
+        data_dir = base / "data" / f"{args.condition}_{args.corpus_scale}"
     out_dir     = args.output_dir or base / "models" / args.condition
     results_dir = args.results_dir or base / "results" / args.condition
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -229,9 +246,22 @@ def train(args: argparse.Namespace) -> None:
     total_steps        = steps_per_epoch * args.epochs
     warmup_steps       = args.warmup_steps if args.warmup_steps is not None \
                          else max(1, int(total_steps * WARMUP_RATIO))
-    steps_per_ckpt     = max(1, int(WORDS_PER_CHECKPOINT / words_per_step))
-    log.info("Total steps: %d  |  Steps/epoch: %d  |  Checkpoint every: %d steps",
-             total_steps, steps_per_epoch, steps_per_ckpt)
+
+    # Dense-early schedule: dense steps (1M-word intervals up to 10M), then sparse
+    # For original conditions use legacy fixed interval
+    is_ablation = args.condition in ABLATION_CONDITIONS
+    if is_ablation:
+        steps_per_dense_ckpt  = max(1, int(DENSE_CKPT_INTERVAL  / words_per_step))
+        steps_per_sparse_ckpt = max(1, int(SPARSE_CKPT_INTERVAL / words_per_step))
+        steps_dense_until     = max(1, int(DENSE_CKPT_UNTIL_WORDS / words_per_step))
+        log.info("Dense-early schedule: every %d steps until %d steps, then every %d steps",
+                 steps_per_dense_ckpt, steps_dense_until, steps_per_sparse_ckpt)
+    else:
+        steps_per_ckpt = max(1, int(WORDS_PER_CHECKPOINT / words_per_step))
+        log.info("Legacy schedule: checkpoint every %d steps", steps_per_ckpt)
+
+    log.info("Total steps: %d  |  Steps/epoch: %d",
+             total_steps, steps_per_epoch)
 
     # ── Resume detection ──────────────────────────────────────────────────────
     resume_ckpt, resume_state = find_latest_checkpoint(out_dir)
@@ -353,7 +383,17 @@ def train(args: argparse.Namespace) -> None:
                          epoch + 1, global_step, total_steps, train_loss,
                          scheduler.get_last_lr()[0], words_seen / 1_000_000)
 
-                if global_step % steps_per_ckpt == 0 or global_step == total_steps:
+                # Determine whether to checkpoint this step
+                if is_ablation:
+                    if global_step <= steps_dense_until:
+                        do_ckpt = (global_step % steps_per_dense_ckpt == 0)
+                    else:
+                        do_ckpt = (global_step % steps_per_sparse_ckpt == 0)
+                    do_ckpt = do_ckpt or (global_step == total_steps)
+                else:
+                    do_ckpt = (global_step % steps_per_ckpt == 0) or (global_step == total_steps)
+
+                if do_ckpt:
                     eval_loss = compute_eval_loss(model, eval_loader, device)
                     log.info("  CHECKPOINT  step=%d  eval_loss=%.4f  ppl=%.2f",
                              global_step, eval_loss, math.exp(eval_loss))
@@ -412,7 +452,7 @@ def train(args: argparse.Namespace) -> None:
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    p.add_argument("--condition",    choices=["chunked", "flat", "balanced"], required=True)
+    p.add_argument("--condition",    choices=ALL_CONDITIONS, required=True)
     p.add_argument("--corpus_scale", choices=["10M", "100M"], default="10M")
     p.add_argument("--data_dir",     type=Path, default=None)
     p.add_argument("--output_dir",   type=Path, default=None)
