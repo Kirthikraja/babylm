@@ -231,7 +231,7 @@ def density_subsample(
     with torch.no_grad():
         for b_start in range(0, len(chunks), batch_size):
             batch = chunks[b_start : b_start + batch_size]
-            max_b_len = max(len(c["input_ids"]) for c in batch)
+            max_b_len = max(len(c["token_ids"]) for c in batch)
             input_ids = torch.zeros(len(batch), max_b_len, dtype=torch.long).to(device)
             attention_mask = torch.zeros_like(input_ids)
             for j, c in enumerate(batch):

@@ -6,7 +6,7 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=40G
-#SBATCH --time=4:00:00
+#SBATCH --time=7-00:00:00
 #SBATCH --partition=gpu-mig-40g
 #SBATCH --gres=gpu:1
 
@@ -29,12 +29,16 @@ conda activate "$ENV_NAME"
 cd "$REPO_ROOT"
 echo "Python: $(which python)"
 
+# Point HuggingFace to a persistent cache so GPT-2 isn't re-downloaded each job
+export HF_HOME="/zfsstore/user/s4570170/hf_cache"
+export TRANSFORMERS_CACHE="$HF_HOME"
+
 # Build all 5 ablation conditions with DENSITY equalization to 50M tokens
 python -u src/partition_corpus.py \
     --corpus data/raw/babylm_100M/corpus.train.txt \
     --out_dir data/ablation_100M \
     --condition all \
     --target_tokens 50000000 \
-    --max_seq_len 1024
+    --max_seq_len 1024 \
 
 echo "Job finished: $(date)"
