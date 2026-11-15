@@ -250,20 +250,32 @@ def density_subsample(
                 log.info("  embedded %d / %d", b_start + len(batch), len(chunks))
 
     X = np.stack(embeddings)  # (n_chunks, hidden)
-    log.info("DENSITY: running MiniBatchKMeans k=%d ...", target_n)
-    km = MiniBatchKMeans(n_clusters=target_n, random_state=42, batch_size=4096, n_init=3)
+
+    # Two-stage DENSITY: cluster into K_COARSE groups, then sample proportionally.
+    # Running k-means with k=target_n (k ≈ n/2) is pathologically slow; coarse
+    # clustering with k<<n converges in minutes and still enforces coverage diversity.
+    K_COARSE = min(500, target_n, len(chunks) // 2)
+    log.info("DENSITY: MiniBatchKMeans k=%d (coarse) then proportional sample to %d ...",
+             K_COARSE, target_n)
+    km = MiniBatchKMeans(n_clusters=K_COARSE, random_state=42, batch_size=4096, n_init=3)
     km.fit(X)
     labels = km.labels_  # (n_chunks,)
 
-    # For each cluster, pick the chunk closest to its centroid
-    centroids = km.cluster_centers_  # (k, hidden)
+    # Sample floor(target_n / K_COARSE) chunks from each cluster, then fill remainder
+    per_cluster = target_n // K_COARSE
+    remainder   = target_n - per_cluster * K_COARSE
+    rng = np.random.default_rng(42)
     kept_idx: list[int] = []
-    for k in range(target_n):
-        members = np.where(labels == k)[0]
+    for c in range(K_COARSE):
+        members = np.where(labels == c)[0]
         if len(members) == 0:
             continue
-        dists = np.linalg.norm(X[members] - centroids[k], axis=1)
-        kept_idx.append(int(members[np.argmin(dists)]))
+        n_take = per_cluster + (1 if c < remainder else 0)
+        n_take = min(n_take, len(members))
+        # Within each cluster keep the centroid-nearest chunks
+        dists = np.linalg.norm(X[members] - km.cluster_centers_[c], axis=1)
+        order = np.argsort(dists)
+        kept_idx.extend(members[order[:n_take]].tolist())
 
     log.info("DENSITY: kept %d chunks out of %d", len(kept_idx), len(chunks))
     kept_idx.sort()
