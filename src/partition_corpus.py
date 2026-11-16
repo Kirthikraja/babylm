@@ -175,20 +175,24 @@ def build_jsonl_chunks(
     max_len: int = MAX_SEQ_LEN,
 ) -> list[dict]:
     """
-    EOS-chunk each block, tokenize, and pack into max_len windows.
-    Returns list of {"input_ids": [...]} dicts.
+    EOS-chunk each block line-by-line, tokenize, and pack into max_len windows.
+    Processes line-by-line to avoid running regex/tokenizer on massive strings
+    (full_baseline produces a single 99M-word block).
     """
-    all_ids: list[int] = []
-    for block in text_blocks:
-        chunked = eos_chunk_text(block)
-        ids = tokenizer.encode(chunked, add_special_tokens=False)
-        all_ids.extend(ids)
-        all_ids.append(EOS_ID)
-
+    buffer: list[int] = []
     chunks: list[dict] = []
-    for start in range(0, len(all_ids) - max_len + 1, max_len):
-        window = all_ids[start : start + max_len]
-        chunks.append({"token_ids": window})
+
+    for block in text_blocks:
+        for line in block.splitlines(keepends=True):
+            if not line.strip():
+                continue
+            ids = tokenizer.encode(eos_chunk_text(line), add_special_tokens=False)
+            buffer.extend(ids)
+            while len(buffer) >= max_len:
+                chunks.append({"token_ids": buffer[:max_len]})
+                del buffer[:max_len]
+        buffer.append(EOS_ID)
+
     return chunks
 
 
