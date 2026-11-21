@@ -27,7 +27,6 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     level=logging.INFO,
     stream=sys.stdout,
-    encoding="utf-8" if sys.version_info >= (3, 9) else None,
 )
 log = logging.getLogger(__name__)
 
