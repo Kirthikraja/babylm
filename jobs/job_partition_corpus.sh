@@ -38,7 +38,7 @@ python -u src/partition_corpus.py \
     --corpus data/raw/babylm_100M/corpus.train.txt \
     --out_dir data/ablation_100M \
     --condition all \
-    --target_tokens 50000000 \
+    --target_tokens 80000000 \
     --max_seq_len 1024 \
 
 echo "Job finished: $(date)"

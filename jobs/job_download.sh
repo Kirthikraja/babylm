@@ -6,8 +6,9 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=16G
-#SBATCH --time=04:00:00
-#SBATCH --partition=cpu-short
+#SBATCH --time=7-00:00:00
+#SBATCH --partition=gpu-mig-40g
+#SBATCH --gres=gpu:1
 
 echo "========================================"
 echo "Job started: $(date)"
@@ -17,6 +18,7 @@ echo "========================================"
 
 module purge
 module load ALICE/default
+module load CUDA/12.4.0
 module load Miniconda3/24.7.1-0
 
 source "$SLURM_SUBMIT_DIR/env.sh"
@@ -27,6 +29,9 @@ conda activate "$ENV_NAME"
 cd "$REPO_ROOT"
 echo "Python: $(which python)"
 
-python -u src/download_data.py --scale 10M
+export HF_HOME="/zfsstore/user/s4570170/hf_cache"
+export TRANSFORMERS_CACHE="$HF_HOME"
+
+python -u src/download_data.py --scale 10M --cache_dir "$HF_HOME"
 
 echo "Job finished: $(date)"
