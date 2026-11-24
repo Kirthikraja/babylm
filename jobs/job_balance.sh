@@ -18,7 +18,7 @@
 #SBATCH --gres=gpu:1
 
 SCALE="${1:-10M}"
-TARGET_K="${2:-1005}"
+TARGET_K="${2:-10000}"
 
 echo "========================================"
 echo "Job started: $(date)"
