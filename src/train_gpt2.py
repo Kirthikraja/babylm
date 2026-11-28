@@ -243,7 +243,13 @@ def train(args: argparse.Namespace) -> None:
     tokens_per_step    = args.batch_size * args.grad_accum * args.max_len
     words_per_step     = tokens_per_step * 0.75
     steps_per_epoch    = math.ceil(n_train / (args.batch_size * args.grad_accum))
-    total_steps        = steps_per_epoch * args.epochs
+    if args.max_steps is not None:
+        total_steps = args.max_steps
+        args.epochs = math.ceil(total_steps / steps_per_epoch)
+        log.info("--max_steps=%d → %d epochs (%.2f passes over data)",
+                 total_steps, args.epochs, total_steps / steps_per_epoch)
+    else:
+        total_steps = steps_per_epoch * args.epochs
     warmup_steps       = args.warmup_steps if args.warmup_steps is not None \
                          else max(1, int(total_steps * WARMUP_RATIO))
 
@@ -393,6 +399,10 @@ def train(args: argparse.Namespace) -> None:
                 else:
                     do_ckpt = (global_step % steps_per_ckpt == 0) or (global_step == total_steps)
 
+                if global_step >= total_steps:
+                    # Save final checkpoint then stop
+                    do_ckpt = True
+
                 if do_ckpt:
                     eval_loss = compute_eval_loss(model, eval_loader, device)
                     log.info("  CHECKPOINT  step=%d  eval_loss=%.4f  ppl=%.2f",
@@ -410,6 +420,12 @@ def train(args: argparse.Namespace) -> None:
                         best_eval_loss, patience_counter, curves,
                         data_hash=data_hash,
                     )
+
+                if global_step >= total_steps:
+                    break  # inner loop
+
+        if global_step >= total_steps:
+            break  # outer epoch loop
 
         # ── End of epoch ──────────────────────────────────────────────────────
         epoch_train_loss = (sum(epoch_step_losses) / len(epoch_step_losses)
@@ -466,6 +482,9 @@ def parse_args() -> argparse.Namespace:
                    help="Max sequence length fed to the model (paper baseline: 512)")
     p.add_argument("--warmup_steps", type=int,   default=None,
                    help="Absolute warmup steps; if omitted uses WARMUP_RATIO × total_steps")
+    p.add_argument("--max_steps",   type=int,   default=None,
+                   help="Fix total gradient steps, overriding --epochs. "
+                        "Use 21300 to match the BabyLM-community GPT-2 reference.")
     return p.parse_args()
 
 

@@ -35,7 +35,7 @@ echo "GPU check: $(python -c 'import torch; print(torch.cuda.get_device_name(0))
 python -u src/train_gpt2.py \
     --condition flat \
     --corpus_scale 10M \
-    --epochs 10 \
+    --max_steps 21300 \
     --batch_size 16 \
     --grad_accum 1 \
     --lr 5e-5 \
